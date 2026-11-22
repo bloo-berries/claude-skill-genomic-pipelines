@@ -1,108 +1,86 @@
-# Genomics Skills for Claude Code
+# Genomics skills for Claude Code
 
-A collection of bioinformatics skills for [Claude Code](https://claude.ai/claude-code) that provide expert guidance on genomic data analysis pipelines.
+Thirteen [Claude Code skills](https://code.claude.com/docs/en/skills) that turn Claude into a careful bioinformatics engineer for sequencing data: short- and long-read variant calling, somatic analysis, RNA-seq (bulk, single-cell, spatial), ChIP/ATAC/CUT&RUN, CNV/SV, annotation and interpretation, methylation, metagenomics, QC, benchmarking and workflow engineering.
 
-## Installation
+The skills are written for an **autonomous agent**, not for a human reading a wiki: every skill starts from a fixed set of operating rules (never load data files into context, inspect headers before asking, verify reference consistency before combining inputs, validate each step, pin and record versions, treat thresholds as defaults, treat human data as controlled-access) and ships bounded inspection scripts so Claude can look at a 200 GB directory without reading it.
 
-Clone this repository and Claude Code will automatically detect the skills when running in this directory:
+## Install
 
-```bash
-git clone https://github.com/your-username/claude_skill_genomics.git
-cd claude_skill_genomics
-```
-
-Or copy the `.claude` folder to your existing project:
+Project-wide (committed with the repository, shared by the team):
 
 ```bash
-cp -r claude_skill_genomics/.claude /path/to/your/project/
+git clone https://github.com/bloo-berries/claude-skill-genomic-pipelines.git
+cp -r claude-skill-genomic-pipelines/.claude/skills /path/to/your/project/.claude/
 ```
 
-## Available Skills
+Personal (every project on this machine):
 
-| Skill | Command | Description |
-|-------|---------|-------------|
-| Genomics | `/genomics` | Main skill - overview, tool selection, routing |
-| WGS/WES | `/genomics:wgs` | Variant calling (GATK, DeepVariant, Mutect2) |
-| RNA-seq | `/genomics:rnaseq` | Bulk & single-cell RNA-seq (DESeq2, Seurat, Scanpy) |
-| ChIP/ATAC-seq | `/genomics:chipseq` | Peak calling, footprinting, motif analysis |
-| Annotation | `/genomics:annotation` | Variant annotation (VEP, SnpEff, ANNOVAR) |
-| QC | `/genomics:qc` | Quality control & preprocessing (FastQC, MultiQC) |
-| CNV/SV | `/genomics:cnv` | Copy number & structural variants (GATK CNV, CNVkit, Manta) |
-
-## Usage
-
-In any Claude Code session:
-
-```
-/genomics           # General bioinformatics help
-/genomics:wgs       # WGS/WES variant calling guidance
-/genomics:rnaseq    # RNA-seq analysis help
-/genomics:cnv       # CNV/SV detection pipelines
+```bash
+cp -r claude-skill-genomic-pipelines/.claude/skills/* ~/.claude/skills/
 ```
 
-## What's Included
+Restart Claude Code (or wait for live reload) and type `/` to see the skills. No `settings.json` entry is required; Claude Code discovers `.claude/skills/<name>/SKILL.md` automatically.
 
-Each skill provides:
+## Skills
 
-- Complete command-line examples with realistic parameters
-- Tool comparison tables for selecting the right tool
-- nf-core pipeline recommendations for production use
-- Quality thresholds and troubleshooting guides
-- R/Python code for downstream analysis
-- Best practices following GATK, ENCODE, and community standards
+| Skill | Invoke | Scope |
+|---|---|---|
+| Router | `/genomics` | Operating rules, inspection scripts, routing, shared conventions, reference/annotation/database sources (`reference.md`) |
+| WGS/WES germline | `/genomics-wgs` | BWA-MEM2, GATK 4.7 (HaplotypeCaller, VQSR, NVScoreVariants, hard filters), DeepVariant 1.10, GLnexus, DRAGEN-GATK, sarek |
+| Somatic | `/genomics-somatic` | Mutect2 full best practice, Strelka2, consensus, PoN, ASCAT/FACETS/PURPLE, MSI/TMB/HRD, signatures, AMP/ASCO/CAP tiers, PCGR, UMI consensus |
+| RNA-seq | `/genomics-rnaseq` | Strandedness inference, decoy-aware Salmon, STAR, DESeq2/edgeR/limma, batch handling, splicing, fusions; scRNA (Seurat v5, Scanpy, ambient/doublet, integration, pseudobulk DE), spatial |
+| ChIP / ATAC / CUT&RUN | `/genomics-chipseq` | MACS3, IDR, deepTools, DiffBind, motifs; ATAC Tn5 handling done correctly, `macs3 hmmratac`, TOBIAS, scATAC; SEACR and spike-in scaling |
+| Annotation & interpretation | `/genomics-annotation` | VEP 116 with plugins, `bcftools +split-vep`, SnpEff, ANNOVAR, liftover; ACMG/ClinGen SVI with calibrated thresholds; slivar, Exomiser, STR, PGx, nf-core/raredisease |
+| QC | `/genomics-qc` | fastp/Trim Galore/cutadapt, FastQC/MultiQC, mosdepth, contamination (VerifyBamID2, FastQ Screen, Kraken2), identity/sex/relatedness (somalier, peddy), PASS/WARN/FAIL tables |
+| CNV / SV | `/genomics-cnv` | GATK gCNV and somatic CNV (with `PreprocessIntervals`), CNVkit, ExomeDepth/DECoN, Manta, smoove, Tiddit, dysgu, merging, AnnotSV/SVAFotate, ClinGen CNV scoring |
+| Long read | `/genomics-longread` | dorado, pbmm2/minimap2, Clair3/DeepVariant, WhatsHap/HiPhase, Sniffles2/cuteSV/pbsv, modkit, TRGT/Straglr, hifiasm/Flye, Iso-Seq/bambu |
+| Methylation | `/genomics-methylation` | Bismark, bwa-meth + MethylDackel, conversion QC, DSS/methylKit/dmrseq, arrays, nf-core/methylseq |
+| Metagenomics | `/genomics-metagenomics` | Host removal, Kraken2/Bracken, MetaPhlAn 4, MAGs (MEGAHIT → binning → CheckM2/GTDB-Tk), HUMAnN, AMR, 16S/QIIME 2, nf-core/taxprofiler, mag, ampliseq |
+| Benchmarking | `/genomics-benchmark` | GIAB truth sets and stratifications, hap.py / vcfeval, Truvari, SEQC2 somatic, nf-core/variantbenchmarking, minimum F1 by assay |
+| Workflow engineering | `/genomics-workflow` | Nextflow DSL2 and nf-core mechanics, Snakemake 8, SLURM, containers and env pinning, cloud and accelerated stacks, failure triage, templates |
 
-## Covered Tools
+Skills also activate automatically when Claude works on matching files (`*.fastq.gz`, `*.bam`, `*.vcf.gz`, `*.narrowPeak`, `*.h5ad`, `*.pod5`, `*.nf`, `Snakefile`, …) or when the request matches a skill's description.
 
-### Alignment
-BWA-MEM2, Bowtie2, STAR, HISAT2, Minimap2
+## Layout
 
-### Variant Calling
-GATK HaplotypeCaller, DeepVariant, Mutect2, Strelka2, FreeBayes, bcftools
-
-### CNV/SV
-GATK CNV, CNVkit, Manta, DELLY, GRIDSS, LUMPY
-
-### RNA-seq
-Salmon, kallisto, STAR, featureCounts, DESeq2, edgeR, Seurat, Scanpy
-
-### ChIP/ATAC-seq
-MACS2, HOMER, DiffBind, TOBIAS
-
-### Annotation
-VEP, SnpEff, ANNOVAR, AnnotSV
-
-### QC
-FastQC, MultiQC, fastp, Picard, mosdepth, Qualimap
-
-## File Structure
-
-```
-.claude/
-├── settings.json          # Skill registration
-└── skills/
-    ├── genomics.md        # Main skill
-    ├── genomics-wgs.md    # WGS/WES pipelines
-    ├── genomics-rnaseq.md # RNA-seq analysis
-    ├── genomics-chipseq.md# ChIP/ATAC-seq
-    ├── genomics-annotation.md # Variant annotation
-    ├── genomics-qc.md     # Quality control
-    └── genomics-cnv.md    # CNV/SV analysis
+```text
+.claude/skills/
+├── genomics/            SKILL.md  reference.md  scripts/{peek.sh,ref_sanity.sh,check_env.sh}
+├── genomics-wgs/        SKILL.md  reference.md
+├── genomics-somatic/    SKILL.md  reference.md
+├── genomics-rnaseq/     SKILL.md  bulk.md  singlecell.md
+├── genomics-chipseq/    SKILL.md  atac.md  cutandrun.md
+├── genomics-annotation/ SKILL.md  acmg.md  rare-disease.md
+├── genomics-qc/         SKILL.md
+├── genomics-cnv/        SKILL.md  reference.md
+├── genomics-longread/   SKILL.md  reference.md
+├── genomics-methylation/SKILL.md  dmr.md
+├── genomics-metagenomics/SKILL.md
+├── genomics-benchmark/  SKILL.md
+└── genomics-workflow/   SKILL.md  templates.md
+scripts/lint_skills.py   repo lint (run in CI)
+scripts/test_scripts.sh  smoke test for the shared scripts
 ```
 
-## Requirements
+Each `SKILL.md` has the same sections: operating rules, environment probe (live tool/version detection), inspect-first table, decision table, workflow with per-step validation, QC thresholds with rationale, pitfalls, nf-core pipelines (names validated in CI), validation, additional resources.
 
-- [Claude Code CLI](https://claude.ai/claude-code)
-- No additional dependencies (skills are prompt-based)
+## Research use only
 
-## Contributing
+Variant classifications, CNV scoring and somatic tiers produced with these skills are research outputs. Clinical reporting requires review by a qualified professional under an accredited workflow (CLIA/CAP, ISO 15189 or local equivalent) with the exact ClinVar/gnomAD/transcript-set versions recorded. Treat all human sequencing data as controlled-access; the skills instruct Claude not to upload data or paste identifiers, but the data-use agreement is yours to enforce.
 
-Contributions welcome! To add or improve skills:
+## Verified against (2026-11-22)
 
-1. Fork the repository
-2. Edit or add skill files in `.claude/skills/`
-3. Register new skills in `.claude/settings.json`
-4. Submit a pull request
+GATK 4.7.0.0, DeepVariant 1.10.0, Ensembl/VEP 116, GENCODE v50 / vM39, gnomAD v4.1, MACS3, samtools/bcftools 1.2x, nf-core/sarek 3.12, Nextflow 25.x, Snakemake 8/9. Versions drift; the monthly CI run validates nf-core names and links, and every skill tells Claude to run `tool --version` rather than trust a number in a file.
+
+## Development
+
+```bash
+python3 scripts/lint_skills.py      # frontmatter, size, bash syntax (needs shellcheck), deprecated tools, nf-core registry, paths
+bash scripts/test_scripts.sh        # shared-script smoke test
+```
+
+Pull requests: keep `SKILL.md` under 400 lines, move long command dumps into supporting files, verify every version string against a primary source, and never recommend a tool the lint lists as deprecated. See `CHANGELOG.md`.
 
 ## License
 
-MIT
+MIT — see `LICENSE`.

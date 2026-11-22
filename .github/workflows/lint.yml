@@ -1,0 +1,36 @@
+name: lint-skills
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 1 * *"   # monthly: catches nf-core renames and dead links
+
+jobs:
+  skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+      - name: Lint skills (frontmatter, size, bash blocks, deprecated tools, nf-core registry, internal paths)
+        run: python3 scripts/lint_skills.py
+      - name: Smoke-test shared scripts
+        run: bash scripts/test_scripts.sh
+
+  links:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # third-party FTP mirrors flap; a dead link is a warning, not a release blocker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check external links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --no-progress --timeout 30 --max-retries 2 --accept 200,206,403,429
+            --exclude '^https?://(localhost|127\.0\.0\.1)'
+            --exclude 'gs://' --exclude 's3://'
+            --exclude '<check current'
+            '.claude/skills/**/*.md' README.md
+          fail: true
