@@ -16,13 +16,13 @@ Expert in somatic SNV/indel discovery and tumour genome characterisation from sh
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 > **Research use only.** Classifications produced here are not clinical results. Clinical reporting requires review by a qualified professional under an accredited workflow (CLIA/CAP, ISO 15189, or local equivalent), with the exact ClinVar/gnomAD/transcript-set versions recorded.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh gatk samtools bcftools configureStrelkaSomaticWorkflow.py configManta.py VarDict run_deepsomatic somaticseq alleleCounter snp-pileup sequenza-utils msisensor-pro fgbio somalier pcgr cpsr Rscript python3 nextflow`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" gatk samtools bcftools configureStrelkaSomaticWorkflow.py configManta.py VarDict run_deepsomatic somaticseq alleleCounter snp-pileup sequenza-utils msisensor-pro fgbio somalier pcgr cpsr Rscript python3 nextflow || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version.
 
@@ -62,10 +62,11 @@ Full runnable scripts: `reference.md` in this directory. Canonical happy path be
 ### 1. Sample-swap and reference checks
 
 ```bash
+set -euo pipefail
 REF=Homo_sapiens_assembly38.fasta
 TBAM=tumour.bam
 NBAM=normal.bam
-bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh ${REF} ${TBAM} ${NBAM} af-only-gnomad.hg38.vcf.gz small_exac_common_3.hg38.vcf.gz
+bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" ${REF} ${TBAM} ${NBAM} af-only-gnomad.hg38.vcf.gz small_exac_common_3.hg38.vcf.gz
 somalier extract -d somalier -s sites.hg38.vcf.gz -f ${REF} ${TBAM} ${NBAM}
 somalier relate -o tn somalier/*.somalier
 ```
@@ -166,6 +167,7 @@ Validate: `bcftools view -f PASS -H deepsomatic.vcf.gz | wc -l`. Model types (v1
 ### 7. Commercial / GPU one-liners
 
 ```bash
+# alternatives: run one (Sentieon TNscope or Parabricks Mutect2)
 REF=Homo_sapiens_assembly38.fasta
 sentieon driver -t 32 -r ${REF} -i tumour.bam -i normal.bam --algo TNscope --tumor_sample tumour --normal_sample normal --dbsnp dbsnp.vcf.gz --pon pon.vcf.gz tnscope.vcf.gz
 pbrun mutectcaller --ref ${REF} --in-tumor-bam tumour.bam --tumor-name tumour --in-normal-bam normal.bam --normal-name normal --out-vcf pb_mutect2.vcf
@@ -176,6 +178,7 @@ Validate: sample names must equal `@RG SM` tags; `bcftools query -l` on output s
 ### 8. Ensemble
 
 ```bash
+set -euo pipefail
 somaticseq --output-directory somaticseq --genome-reference ${REF} --inclusion-region ${INTERVALS_BED} --threads 16 \
 paired --tumor-bam-file ${TBAM} --normal-bam-file ${NBAM} \
   --mutect2-vcf somatic.filtered.vcf.gz --vardict-vcf vardict.vcf.gz \
@@ -198,6 +201,7 @@ R scripts: `reference.md` §ASCAT, §FACETS. Validate: purity estimates from two
 ### 10. Biomarkers
 
 ```bash
+set -euo pipefail
 REF=Homo_sapiens_assembly38.fasta
 msisensor-pro scan -d ${REF} -o ref.microsat.list
 msisensor-pro msi -d ref.microsat.list -n normal.bam -t tumour.bam -o msi/sample -c 20 -b 8
@@ -223,6 +227,7 @@ Validate: `head -2 msi/sample` → `%` unstable sites; MSI-H ≥20% (MSIsensor-p
 | IV | Benign / likely benign | gnomAD AF >1% or known benign |
 
 ```bash
+set -euo pipefail
 pcgr --input_vcf somatic.pass.vcf.gz --input_cna cna_segments.tsv --vep_dir ${VEP_DIR} --refdata_dir ${PCGR_DATA} \
   --output_dir pcgr --genome_assembly grch38 --sample_id ${SAMPLE} --assay WES --tumor_site 15 \
   --tumor_purity 0.6 --tumor_ploidy 2.1 --tumor_dp_tag TDP --tumor_af_tag TAF --control_dp_tag NDP --control_af_tag NAF \

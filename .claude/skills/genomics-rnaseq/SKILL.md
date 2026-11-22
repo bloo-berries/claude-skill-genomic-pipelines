@@ -17,11 +17,11 @@ Expert in transcriptome quantification and inference: bulk RNA-seq (alignment or
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh STAR salmon kallisto featureCounts samtools infer_experiment.py cellranger spaceranger kb Rscript python3 nextflow`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" STAR salmon kallisto featureCounts samtools infer_experiment.py cellranger spaceranger kb Rscript python3 nextflow || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version.
 
@@ -191,6 +191,8 @@ Notes: `--aligner star_salmon` is the default (STAR BAM + Salmon quant of the tr
 **nf-core/spatialvi** (no tagged release as of 2026-11-22; `dev` only - pin `-r <commit>`). Raw header: `sample,fastq_dir,image,slide,area` (`cytaimage` instead of `image` for CytAssist; `--spaceranger_probeset` for FFPE). Processed header: `sample,spaceranger_dir`. Visium v1/v2/HD (`--hd_bin_size`, default 8 µm).
 
 **nf-core/rnasplice** (2.0.0): rMATS, DEXSeq, SUPPA2, edgeR DEU from the same `sample,fastq_1,fastq_2,strandedness,condition` sheet.
+
+**nf-core/smrnaseq** (2.4.1 as of 2026-11-22; verify current release in `https://nf-co.re/pipelines.json`). Small RNA / miRNA from single-end FASTQ. Header: `sample,fastq_1`. Library protocol is a config profile since 2.4 (`-profile illumina|qiaseq|nextflex|cats`, or set `--three_prime_adapter`/`--clip_r1` by hand); `--mirtrace_species hsa|mmu|...` is required; `--mirgenedb` switches miRBase → MirGeneDB; Bowtie1 quantification, `edger_qc/` count matrices, `mirtrace/` QC.
 
 ## Validation
 

@@ -1,6 +1,6 @@
 # References, annotations, databases and data retrieval
 
-All URLs below returned HTTP 200 on 2026-11-22. Re-check before quoting a release number: GENCODE, Ensembl, ClinVar and dbNSFP move every few months. Record the exact file name and checksum in `versions.txt`.
+All URLs below returned HTTP 200 on 2026-11-22 unless marked `<check current: …>`. Re-check before quoting a release number: GENCODE, Ensembl, ClinVar and dbNSFP move every few months. Record the exact file name and checksum in `versions.txt`.
 
 ## 1. Choose the build before anything else
 
@@ -102,6 +102,7 @@ tabix -p vcf dbsnp_GRCh38_ucsc.vcf.gz
 ## 3. T2T-CHM13v2.0
 
 ```bash
+set -euo pipefail
 wget -c https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz
 wget -c https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/annotation/chm13v2.0_RefSeq_Liftoff_v5.2.gff3.gz
 ```
@@ -142,7 +143,78 @@ Chain files for liftover to/from GRCh38 are under `.../T2T/CHM13/assemblies/chai
 
 Always: `md5sum -c` or compare to the provider's checksum; record accession, date and checksum in `versions.txt`.
 
-## 7. Provenance snippet
+## 7. Spike-in genomes (ChIP-Rx / CUT&RUN normalisation)
+
+| Spike-in | FASTA | Notes |
+|---|---|---|
+| *D. melanogaster* dm6 (Active Motif ChIP-Rx) | `https://hgdownload.soe.ucsc.edu/goldenPath/dm6/bigZips/dm6.fa.gz` (+ `dm6.chrom.sizes`) | Build a combined index (`cat GRCh38_no_alt.fa dm6.fa`) with prefixed contig names, or align twice and count reads with MAPQ ≥ 30 per genome |
+| *E. coli* K-12 MG1655 (CUT&RUN/CUT&Tag carry-over) | `https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/005/845/GCF_000005845.2_ASM584v2/GCF_000005845.2_ASM584v2_genomic.fna.gz` (`NC_000913.3`) | Assembly `GCF_000005845.2`; scale factor = constant / spike-in reads; see `genomics-chipseq` |
+
+## 8. Mappability, segmental duplications, common SNP sites (GATK CNV)
+
+| Track | URL | Use |
+|---|---|---|
+| Umap k100 single-read mappability, hg38 | `https://bismap.hoffmanlab.org/raw/hg38/k100.umap.bedgraph.gz` (index: `https://bismap.hoffmanlab.org/`; Bismap k100 for bisulfite: `.../raw/hg38/k100.bismap.bed.gz`) | `gatk AnnotateIntervals --mappability-track` — bedGraph with score 0–1 in column 4; sort, bgzip, `tabix -p bed` |
+| UCSC segmental duplications, hg38 | `https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/genomicSuperDups.txt.gz` | `--segmental-duplication-track` wants BED: `zcat genomicSuperDups.txt.gz \| cut -f2-4,27 \| sort -k1,1 -k2,2n \| bgzip > segdups.hg38.bed.gz && tabix -p bed segdups.hg38.bed.gz` (col 27 = fracMatch) |
+| Common biallelic SNPs for `CollectAllelicCounts` / `GetPileupSummaries` | `small_exac_common_3.hg38.vcf.gz` (section 2, somatic bucket) | ExAC-derived, ≈60 k sites, AF-only; for denser allelic counts use `af-only-gnomad.hg38.vcf.gz` filtered with `bcftools view -m2 -M2 -v snps -i 'AF>0.05'` |
+
+Both GATK tracks must be on the same contig names as the reference `.dict`; GATK ignores unindexed `.bed.gz`.
+
+## 9. Region BEDs: PAR, tandem repeats, exclusion lists
+
+GRCh38 PAR (NCBI/Ensembl, 1-based): PAR1 chrX:10,001–2,781,479 = chrY:10,001–2,781,479; PAR2 chrX:155,701,383–156,030,895 = chrY:56,887,903–57,217,415. Write as 0-based BED:
+
+```bash
+printf 'chrX\t10000\t2781479\tPAR1\nchrX\t155701382\t156030895\tPAR2\nchrY\t10000\t2781479\tPAR1\nchrY\t56887902\t57217415\tPAR2\n' > GRCh38_PAR.bed
+```
+
+Use it to exclude PAR from haploid-ploidy calls on XY samples (`-XL GRCh38_PAR.bed`) or to mask chrY PAR (Broad `Homo_sapiens_assembly38` already hard-masks chrY PAR to N).
+
+| BED | URL | Use |
+|---|---|---|
+| Sniffles2 tandem-repeat annotations | `https://github.com/fritzsedlazeck/Sniffles/tree/master/annotations` (`human_GRCh38_no_alt_analysis_set.trf.bed`) | `sniffles --tandem-repeats`; improves SV calls in repeats; `chr` names |
+| DELLY exclude templates | `https://github.com/dellytools/delly/tree/main/excludeTemplates` (`human.hg38.excl.tsv`) | `delly call -x human.hg38.excl.tsv`; drops centromeres/telomeres/decoys |
+| ENCODE blacklist v2 | section 2 (`hg38-blacklist.v2.bed.gz`) | Peak filtering (ChIP/ATAC) and CNV/SV FP removal |
+
+## 10. Dosage sensitivity and SV/CNV population frequency
+
+| Resource | URL | Notes |
+|---|---|---|
+| ClinGen dosage map (HI/TS scores) | `https://ftp.clinicalgenome.org/` — `ClinGen_gene_curation_list_GRCh38.tsv`, `ClinGen_region_curation_list_GRCh38.tsv`, `ClinGen_haploinsufficiency_gene_GRCh38.bed`, `ClinGen_triplosensitivity_gene_GRCh38.bed`, `ClinGen_recurrent_CNV_V2.1-hg38.bed` | Updated nightly; score 3 = sufficient evidence; ACMG/ClinGen CNV scoring (`genomics-cnv`) |
+| gnomAD SV v4.1 (genomes) | `https://storage.googleapis.com/gcp-public-data--gnomad/release/4.1/genome_sv/gnomad.v4.1.sv.sites.vcf.gz` (+ `.bed.gz`) | `chr` names; AF per SVTYPE; use with SVAFotate/AnnotSV |
+| gnomAD CNV v4.1 (exomes) | `https://storage.googleapis.com/gcp-public-data--gnomad/release/4.1/exome_cnv/gnomad.v4.1.cnv.all.vcf.gz` | Rare coding CNVs (GATK-gCNV); no `.bed.gz` companion |
+| Browser download page | `https://gnomad.broadinstitute.org/downloads` | Lists current SV/CNV file names and checksums |
+
+## 11. Pathogenicity scores and liftover chains
+
+| Resource | URL | Licence / notes |
+|---|---|---|
+| CADD v1.7 GRCh38 | `https://cadd.bihealth.org/download` → `https://kircherlab.bihealth.org/download/CADD/v1.7/GRCh38/whole_genome_SNVs.tsv.gz` (≈80 GB, + `.tbi`) | Free for academic/non-commercial; commercial via licence. VEP plugin `CADD` |
+| dbNSFP 5.x | `https://www.dbnsfp.org/download` | Academic build free (registration); commercial build licensed. Aggregates REVEL, AlphaMissense, SIFT, PolyPhen etc.; prefer it over separate files when licence allows |
+| SpliceAI precomputed scores | `https://basespace.illumina.com/s/otSPW8hnhaZR` (BaseSpace account; `spliceai_scores.raw.snv.hg38.vcf.gz`) | Illumina non-commercial licence; VEP plugin `SpliceAI` |
+| AlphaMissense | `https://zenodo.org/records/8208688` (`AlphaMissense_hg38.tsv.gz`) | CC BY-NC-SA 4.0 — non-commercial; VEP plugin `AlphaMissense` |
+| REVEL | `https://zenodo.org/records/7072866` (`revel-v1.3_all_chromosomes.zip`, GRCh37+GRCh38 positions) | Free for research; VEP plugin `REVEL` |
+| UCSC liftover chains | `https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz`; `https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHg19.over.chain.gz`; T2T: `.../hs1/liftOver/hs1ToHg38.over.chain.gz`, `.../hg38/liftOver/hg38ToHs1.over.chain.gz` (also section 3) | `CrossMap.py vcf chain.gz in.vcf ref.fa out.vcf` or `gatk LiftoverVcf`; lift results, not reads |
+
+## 12. Metagenomics databases
+
+| Database | URL | Notes |
+|---|---|---|
+| Kraken2/Bracken pre-built indexes | `https://benlangmead.github.io/aws-indexes/k2` | Standard (≈80 GB RAM), Standard-8/16 (capped), PlusPF, nt; Bracken `kmer_distrib` included; record the dated tarball name |
+| GTDB-Tk reference data | `https://ecogenomics.github.io/GTDBTk/installing/index.html` → `https://data.gtdb.ecogenomic.org/releases/latest/auxillary_files/gtdbtk_package/full_package/gtdbtk_data.tar.gz` | ≈110 GB unpacked; set `GTDBTK_DATA_PATH`; release must match the GTDB-Tk version |
+| SILVA SSU/LSU rRNA | `<check current: https://www.arb-silva.de/download/>` (`SILVA_138.2_SSURef_NR99_tax_silva.fasta.gz`; HEAD timed out on 2026-11-22) | 16S/18S amplicons; DADA2/QIIME2-formatted trainsets are separate downloads |
+| MetaPhlAn 4 | `metaphlan --install --bowtie2db ${DB}` pulls from `http://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/` | HUMAnN requires the matching ChocoPhlAn/UniRef release |
+
+## 13. Bisulfite / EM-seq conversion controls
+
+| Control | Accession | Retrieval |
+|---|---|---|
+| Lambda phage (unmethylated) | `NC_001416.1` | `efetch -db nuccore -id NC_001416.1 -format fasta > lambda.fa` or `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_001416.1&rettype=fasta&retmode=text` |
+| pUC19 (CpG-methylated) | `L09137` | `efetch -db nuccore -id L09137 -format fasta > pUC19.fa` (returns `L09137.2`) |
+
+Append both to the reference before `bismark_genome_preparation`; conversion rate = 1 − (methylated C / total C on lambda); pUC19 CpG methylation should be ≈ 95–100 %. efetch endpoints answer GET only (HEAD returns 405).
+
+## 14. Provenance snippet
 
 ```bash
 set -euo pipefail
@@ -153,7 +225,7 @@ mkdir -p "${OUT}"
   echo "reference: $(readlink -f "${REF}") md5=$(md5sum "${REF}" | cut -d' ' -f1)"
   echo "gtf: $(readlink -f "${GTF}") md5=$(md5sum "${GTF}" | cut -d' ' -f1)"
   for t in samtools bcftools gatk bwa-mem2 STAR salmon vep nextflow; do
-    command -v "${t}" >/dev/null 2>&1 && bash "${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh" "${t}"
+    command -v "${t}" >/dev/null 2>&1 && bash "${CLAUDE_SKILL_DIR}/scripts/check_env.sh" "${t}"
   done
 } >> "${OUT}/versions.txt"
 ```

@@ -26,19 +26,13 @@ REF=/refs/GRCh38/Homo_sapiens_assembly38.fasta
 SAMPLE=NA12878
 DBSNP=/refs/GRCh38/Homo_sapiens_assembly38.dbsnp138.vcf
 OUTDIR=intervals
-for IL in ${OUTDIR}/*.interval_list; do
-  SHARD=$(basename ${IL} .interval_list)
-  gatk --java-options "-Xmx4g" HaplotypeCaller -R ${REF} -I ${SAMPLE}.bqsr.bam -D ${DBSNP} \
-    -L ${IL} -ERC GVCF -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \
-    --native-pair-hmm-threads 2 -O ${SAMPLE}.${SHARD}.g.vcf.gz &
-done
-wait
+printf '%s\n' ${OUTDIR}/*.interval_list | xargs -P 8 -I{} bash -c 'IL=$1; SHARD=$(basename "${IL}" .interval_list); gatk --java-options "-Xmx4g" HaplotypeCaller -R "$2" -I "$3".bqsr.bam -D "$4" -L "${IL}" -ERC GVCF -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation --native-pair-hmm-threads 2 -O "$3.${SHARD}.g.vcf.gz"' _ {} ${REF} ${SAMPLE} ${DBSNP}
 gatk GatherVcfs $(for IL in ${OUTDIR}/*.interval_list; do printf -- '-I %s.%s.g.vcf.gz ' ${SAMPLE} $(basename ${IL} .interval_list); done) -O ${SAMPLE}.g.vcf.gz
 tabix -f -p vcf ${SAMPLE}.g.vcf.gz
 bcftools view -H ${SAMPLE}.g.vcf.gz | cut -f1 | uniq | wc -l
 ```
 
-`GatherVcfs` requires shards in genomic order; `SplitIntervals` names (`0000-scattered…`) sort correctly. Replace the `&`/`wait` loop with your scheduler array (see `.claude/skills/genomics-workflow/SKILL.md`). `GatherVcfs` does not write an index — always `tabix` after.
+`xargs -P` exits non-zero if any shard fails (unlike a bare `&`/`wait` loop, which discards exit codes); keep `-P` ≤ RAM / 4 GB. `GatherVcfs` requires shards in genomic order; `SplitIntervals` names (`0000-scattered…`) sort correctly. Replace the `xargs` fan-out with your scheduler array (see `.claude/skills/genomics-workflow/SKILL.md`). `GatherVcfs` does not write an index — always `tabix` after.
 
 ### Haploid X/Y for XY samples (HaplotypeCaller)
 

@@ -26,7 +26,8 @@ case "${LIBTYPE}" in
   ISR|SR) FC_S=2; PICARD_STRAND=FIRST_READ_TRANSCRIPTION_STRAND;  KALLISTO_STRAND="--rf-stranded"; RMATS_LIB=fr-firststrand ;;
   *) echo "unexpected libtype ${LIBTYPE}" >&2; exit 1 ;;
 esac
-printf 'LIBTYPE=%s FC_S=%s PICARD_STRAND=%s\n' "${LIBTYPE}" "${FC_S}" "${PICARD_STRAND}" | tee strand_check/strand.env
+mkdir -p strand_check
+printf 'LIBTYPE=%s\nFC_S=%s\nPICARD_STRAND=%s\nKALLISTO_STRAND=%q\nRMATS_LIB=%s\n' "${LIBTYPE}" "${FC_S}" "${PICARD_STRAND}" "${KALLISTO_STRAND}" "${RMATS_LIB}" | tee strand_check/strand.env
 ```
 
 With an existing BAM instead of FASTQ (RSeQC):

@@ -88,7 +88,7 @@ def code_blocks(text: str, path: Path):
     lines = text.splitlines()
     i = 0
     while i < len(lines):
-        m = re.match(r"^(\s*)(```+|~~~+)\s*([\w+-]*)\s*$", lines[i])
+        m = re.match(r"^(\s*)(```+|~~~+)\s*([\w+-]*)(?:\s[^`]*)?$", lines[i])
         if not m:
             i += 1
             continue
@@ -104,6 +104,14 @@ def code_blocks(text: str, path: Path):
         i = j + 1
 
 
+def is_command(row: str) -> bool:
+    """A line that can fail: not blank, not a comment, not a plain variable assignment."""
+    s = row.strip()
+    if not s or s.startswith("#"):
+        return False
+    return not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=(?!.*\$\()", s)
+
+
 def check_bash_block(body: str, path: Path, start: int, shellcheck: str | None) -> None:
     rows = body.splitlines()
     for k, row in enumerate(rows[:-1]):
@@ -115,6 +123,14 @@ def check_bash_block(body: str, path: Path, start: int, shellcheck: str | None) 
                 err(f"{path}:{start + k + 1}: comment inside backslash continuation")
             elif nxt.strip() == "\\":
                 err(f"{path}:{start + k + 1}: bare backslash line")
+    # Rule 4: a block with two or more top-level command lines must start with set -euo pipefail.
+    # Exempt: blocks that open with "# alternatives" (independent one-liners, run one) and sbatch headers.
+    logical = re.sub(r"\\\n\s*", " ", body).splitlines()
+    cmds = [r for r in logical if is_command(r)]
+    alternatives = bool(rows) and rows[0].strip().lower().startswith("# alternatives")
+    if len(cmds) >= 2 and not alternatives and not any(r.strip().startswith("set -euo pipefail") for r in cmds[:2]):
+        if not any(r.strip().startswith("#SBATCH") for r in logical[:3]):
+            err(f"{path}:{start}: multi-command bash block without `set -euo pipefail` as its first command (or open it with `# alternatives: run one`)")
     if shellcheck:
         with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
             fh.write("#!/usr/bin/env bash\n" + body + "\n")
@@ -176,6 +192,15 @@ def main(argv: list[str]) -> int:
             err(f"{skill}: description > 1024 chars")
         elif "Use when" not in desc and "use when" not in desc:
             warn(f"{skill}: description has no 'Use when' trigger clause")
+        for key in ("allowed-tools", "disallowed-tools", "model", "context", "agent", "hooks", "effort"):
+            if key in fm:
+                err(f"{skill}: frontmatter key {key!r} is not permitted in this repo (see CLAUDE.md)")
+        if "CLAUDE_PROJECT_DIR" in text:
+            err(f"{skill}: references ${{CLAUDE_PROJECT_DIR}}; resolve scripts via ${{CLAUDE_SKILL_DIR}} instead")
+        inj = [l for l in text.splitlines() if l.startswith("!`")]
+        for l in inj:
+            if not re.match(r'^!`f="\$\{CLAUDE_SKILL_DIR\}(/\.\./genomics)?/scripts/check_env\.sh"; \[ -f "\$f" \] && bash "\$f" [A-Za-z0-9._+ -]+ \|\| true`$', l):
+                err(f"{skill}: dynamic-context line must be the guarded check_env.sh form: {l[:80]}")
         n = text.count("\n") + 1
         if n > 500:
             err(f"{skill}: {n} lines > 500")
@@ -203,9 +228,11 @@ def main(argv: list[str]) -> int:
         for lang, body, start in code_blocks(text, md):
             if lang in ("bash", "sh", "shell"):
                 check_bash_block(body, md, start, shellcheck)
+            # Join backslash continuations so `samtools view \<nl> -bS` and `mosdepth -b x \<nl> --by` are caught.
+            joined = re.sub(r"\\\n\s*", " ", body)
             for rx, why in DEPRECATED:
-                for m in rx.finditer(body):
-                    line = start + body[: m.start()].count("\n")
+                for m in rx.finditer(joined):
+                    line = start + joined[: m.start()].count("\n")  # approximate when continuations precede the match
                     err(f"{md}:{line}: deprecated `{m.group(0).strip()}` ({why})")
         for m in re.finditer(r"nf-core/([a-z0-9]+)", text):
             ls = text.rfind("\n", 0, m.start()) + 1

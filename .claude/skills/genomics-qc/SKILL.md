@@ -17,11 +17,11 @@ Expert in sequencing QC: raw reads, alignments, coverage, contamination, identit
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh fastqc fastp trim_galore cutadapt multiqc samtools mosdepth gatk VerifyBamID somalier peddy fastq_screen kraken2 preseq NanoPlot cramino`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" fastqc fastp trim_galore cutadapt multiqc samtools mosdepth gatk VerifyBamID somalier peddy fastq_screen kraken2 preseq NanoPlot cramino || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version.
 
@@ -71,7 +71,7 @@ Set once per project: `THREADS=8`, `REF=GRCh38.fa`, `OUT=qc`, `SAMPLE=S1`. Every
 set -euo pipefail
 OUT=qc
 mkdir -p "${OUT}"
-bash "${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh" fastqc fastp multiqc samtools mosdepth gatk VerifyBamID somalier > "${OUT}/versions.txt"
+bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh" fastqc fastp multiqc samtools mosdepth gatk VerifyBamID somalier > "${OUT}/versions.txt"
 date -u +%Y-%m-%dT%H:%MZ >> "${OUT}/versions.txt"
 for f in *.fastq.gz; do gzip -t "${f}"; done
 for b in *.bam; do samtools quickcheck -v "${b}"; done
@@ -183,10 +183,10 @@ OUT=qc
 SITES=sites.hg38.vcf.gz
 mkdir -p "${OUT}/somalier"
 for b in *.bam; do somalier extract -d "${OUT}/somalier" --sites "${SITES}" -f "${REF}" "${b}"; done
-somalier relate --sites "${SITES}" --ped cohort.ped -o "${OUT}/somalier/cohort" "${OUT}/somalier"/*.somalier
+somalier relate --infer --sites "${SITES}" --ped cohort.ped -o "${OUT}/somalier/cohort" "${OUT}/somalier"/*.somalier
 ```
 
-Validate: `awk -F'\t' 'NR>1 && $5!=$6' ${OUT}/somalier/cohort.samples.tsv` lists samples whose pedigree sex ≠ inferred sex (check column header names first: `head -1 ... | tr '\t' '\n' | nl`); `awk -F'\t' 'NR>1 && $3>0.8' ${OUT}/somalier/cohort.pairs.tsv` lists identical pairs — expected only for tumour/normal or replicates. RNA-seq: add `--min-ab 0.2`. Cross-assay: extract from every BAM/VCF with the same sites and relate together.
+Validate: `awk -F'\t' 'NR>1 && $5!=$7' ${OUT}/somalier/cohort.samples.tsv` lists samples whose pedigree sex ≠ inferred sex (columns: 5=sex, 6=phenotype, 7=original_pedigree_sex; check column header names first: `head -1 ... | tr '\t' '\n' | nl`); `awk -F'\t' 'NR>1 && $3>0.8' ${OUT}/somalier/cohort.pairs.tsv` lists identical pairs — expected only for tumour/normal or replicates. RNA-seq: add `--min-ab 0.2`. Cross-assay: extract from every BAM/VCF with the same sites and relate together.
 
 Alternatives: `peddy -p 4 --plot --sites hg38 --prefix ${OUT}/peddy joint.vcf.gz cohort.ped` (VCF+PED; writes `*.sex_check.csv`, `*.ped_check.csv`). NGSCheckMate 1.0.1 from FASTQ: `python ncm_fastq.py -l fastq_list.txt -pt SNP/SNP.pt -O ${OUT}/ncm -N cohort` (FASTQ-only or when assays lack shared called sites).
 

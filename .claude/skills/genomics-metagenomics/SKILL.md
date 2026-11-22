@@ -16,11 +16,11 @@ Expert in shotgun and amplicon microbiome pipelines: routing by data type, host 
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh kraken2 bracken metaphlan sylph hostile bowtie2 megahit spades.py metabat2 SemiBin2 DAS_Tool checkm2 gtdbtk humann emapper.py amrfinder rgi qiime nextflow Rscript`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" kraken2 bracken metaphlan sylph hostile bowtie2 megahit spades.py metabat2 SemiBin2 DAS_Tool checkm2 gtdbtk humann emapper.py amrfinder rgi qiime nextflow Rscript || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version.
 
@@ -71,6 +71,7 @@ Variables used throughout: `SAMPLE`, `THREADS`, `K2DB` (Kraken2 index dir), `DBV
 set -euo pipefail
 SAMPLE=S1
 THREADS=16
+mkdir -p clean
 hostile clean --fastq1 "raw/${SAMPLE}_R1.fastq.gz" --fastq2 "raw/${SAMPLE}_R2.fastq.gz" --index human-t2t-hla --threads "${THREADS}" --out-dir clean > "clean/${SAMPLE}.hostile.json"
 ```
 Validate: `jq '.[0] | {reads_in, reads_out, reads_removed_proportion}' clean/${SAMPLE}.hostile.json` (proportion removed consistent with sample type: stool <1 %, saliva 50–90 %, tissue >95 %). Bowtie2 alternative: `bowtie2 --very-sensitive -p ${THREADS} -x ref/GRCh38_T2T -1 R1 -2 R2 --un-conc-gz clean/${SAMPLE}_R%.fastq.gz -S /dev/null`, then validate with `zcat clean/${SAMPLE}_R1.fastq.gz | awk 'END{print NR/4" pairs kept"}'`. Raw-read QC/trimming (fastp) lives in `.claude/skills/genomics-qc/SKILL.md`.

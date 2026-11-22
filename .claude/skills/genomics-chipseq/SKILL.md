@@ -1,6 +1,6 @@
 ---
 name: genomics-chipseq
-description: ChIP-seq peak calling, QC, differential binding and motif analysis (MACS3, IDR, deepTools, DiffBind, ChIPseeker, HOMER/MEME), with routing to ATAC-seq, CUT&RUN/CUT&Tag and scATAC supporting files. Use when inputs are IP/input FASTQ or BAM pairs, narrowPeak/broadPeak/bedGraph files, or the user mentions antibody, histone mark, Tn5, accessibility, SEACR, IgG, spike-in, footprinting. Not for raw-read QC/trimming (genomics-qc), methylation (genomics-methyl), or RNA-seq (genomics-rnaseq).
+description: ChIP-seq peak calling, QC, differential binding and motif analysis (MACS3, IDR, deepTools, DiffBind, ChIPseeker, HOMER/MEME), with routing to ATAC-seq, CUT&RUN/CUT&Tag and scATAC supporting files. Use when inputs are IP/input FASTQ or BAM pairs, narrowPeak/broadPeak/bedGraph files, or the user mentions antibody, histone mark, Tn5, accessibility, SEACR, IgG, spike-in, footprinting. Not for raw-read QC/trimming (genomics-qc), methylation (genomics-methylation), or RNA-seq (genomics-rnaseq).
 argument-hint: "[chip|atac|cutandrun|scatac] [path]"
 paths:
   - "**/*.narrowPeak"
@@ -18,11 +18,11 @@ Expert in chromatin profiling: ChIP-seq (TF and histone), ATAC-seq, CUT&RUN/CUT&
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh bowtie2 bwa-mem2 samtools gatk bedtools macs3 idr deeptools bamCoverage plotFingerprint run_spp.R findMotifsGenome.pl meme-chip Rscript nextflow`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" bowtie2 bwa-mem2 samtools gatk bedtools macs3 idr deeptools bamCoverage plotFingerprint run_spp.R findMotifsGenome.pl meme-chip Rscript nextflow || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version.
 
@@ -76,13 +76,15 @@ samtools index "${SAMPLE}.sorted.bam"
 
 Single-end: `-U reads.fq.gz`, filter `-q 30 -F 1796` (drop `-f 2`). `-F 1804` = unmapped, mate unmapped, secondary, QC-fail, duplicate. Validation: `grep overall "${SAMPLE}.bowtie2.log"` (expect >80 %).
 
-### 2. Mark duplicates (choose one)
+### 2. Mark duplicates (choose one), then exclude by flag
+
+Duplicates are **marked** (flag 1024) and excluded downstream with `-F 1804` / `--ignoreDuplicates` (MACS3 ignores them by default); the marked BAM keeps the reads for complexity metrics and for assays where "duplicates" are real (CUT&RUN/Tag, see `cutandrun.md`). Physically removing them (`--REMOVE_DUPLICATES true`, `markdup -r`) is a data-discarding step: do it only on the user's instruction.
 
 ```bash
 set -euo pipefail
 SAMPLE=IP_rep1
 gatk MarkDuplicates -I "${SAMPLE}.sorted.bam" -O "${SAMPLE}.dedup.bam" \
-  -M "${SAMPLE}.dup_metrics.txt" --REMOVE_DUPLICATES true --CREATE_INDEX true
+  -M "${SAMPLE}.dup_metrics.txt" --REMOVE_DUPLICATES false --CREATE_INDEX true
 ```
 
 ```bash
@@ -91,19 +93,22 @@ SAMPLE=IP_rep1
 samtools collate -@ 4 -O -u "${SAMPLE}.sorted.bam" \
   | samtools fixmate -@ 4 -m -u - - \
   | samtools sort -@ 4 -u - \
-  | samtools markdup -@ 4 -r -s - "${SAMPLE}.dedup.bam"
+  | samtools markdup -@ 4 -s - "${SAMPLE}.dedup.bam"
 samtools index "${SAMPLE}.dedup.bam"
 ```
 
 `samtools markdup` requires `fixmate -m` (MC/ms tags) on name-collated input; skipping it silently under-marks. Validation: `grep -A1 LIBRARY "${SAMPLE}.dup_metrics.txt"` or `samtools flagstat` duplicate line; record PERCENT_DUPLICATION (ENCODE NRF/PBC1/PBC2 targets in QC table).
 
-### 3. Blacklist removal and re-index
+### 3. Duplicate-flag and blacklist filtering, re-index
+
+`filt.bam` is the analysis BAM: marked duplicates dropped by flag (the marked `dedup.bam` stays on disk), blacklist regions removed.
 
 ```bash
 set -euo pipefail
 SAMPLE=IP_rep1
 BLACKLIST=/refs/blacklists/hg38-blacklist.v2.bed
-bedtools intersect -v -abam "${SAMPLE}.dedup.bam" -b "${BLACKLIST}" > "${SAMPLE}.filt.bam"
+samtools view -b -F 1024 "${SAMPLE}.dedup.bam" \
+  | bedtools intersect -v -abam stdin -b "${BLACKLIST}" > "${SAMPLE}.filt.bam"
 samtools index "${SAMPLE}.filt.bam"
 samtools quickcheck "${SAMPLE}.filt.bam"
 ```
@@ -150,6 +155,7 @@ awk -v a="${INPEAK}" -v b="${TOTAL}" 'BEGIN{printf "FRiP\t%.4f\n", a/b}'
 
 ```bash
 set -euo pipefail
+mkdir -p idr
 idr --samples peaks/IP_rep1_peaks.narrowPeak peaks/IP_rep2_peaks.narrowPeak \
   --input-file-type narrowPeak --rank p.value --output-file idr/rep1_vs_rep2.idr.txt \
   --plot --log-output-file idr/rep1_vs_rep2.idr.log

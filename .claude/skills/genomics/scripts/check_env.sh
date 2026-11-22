@@ -1,7 +1,26 @@
 #!/usr/bin/env bash
 # Print "tool<TAB>version|MISSING" for each tool named on the command line.
 # Always exits 0 so it is safe inside skill dynamic-context injection.
+# Each probe is time-limited and its output truncated to one short line, so a hung or
+# hostile binary cannot stall skill loading or inject multi-line text into the agent context.
 # Usage: check_env.sh gatk bwa-mem2 samtools bcftools nextflow
+
+# Refuse to probe through relative PATH entries ("." or empty): they let a file in the
+# current directory impersonate a tool at skill-load time.
+case ":${PATH}:" in
+  *:.:*|*::*|*:./*) echo "check_env: PATH contains a relative entry; refusing to probe tools" >&2; exit 0 ;;
+esac
+
+# Run a probe with a wall-clock limit when timeout(1)/gtimeout exist; otherwise run it directly.
+if command -v timeout >/dev/null 2>&1; then
+  probe() { timeout 10 "$@"; }
+elif command -v gtimeout >/dev/null 2>&1; then
+  probe() { gtimeout 10 "$@"; }
+else
+  probe() { "$@"; }
+fi
+
+bound() { head -c 80 | tr -d '\n\r\t' ; }
 
 version_of() {
   local tool=$1 out
@@ -44,9 +63,14 @@ if [ $# -eq 0 ]; then
   exit 0
 fi
 
+export -f version_of
 for t in "$@"; do
+  case "$t" in
+    *[!A-Za-z0-9._+-]*) printf '%s\tINVALID\n' "$t"; continue ;;   # tool names only; no paths or shell metacharacters
+  esac
   if command -v "$t" >/dev/null 2>&1; then
-    printf '%s\t%s\n' "$t" "$(version_of "$t")"
+    v=$(probe bash -c 'version_of "$1"' _ "$t" 2>/dev/null | bound)
+    printf '%s\t%s\n' "$t" "${v:-present}"
   else
     printf '%s\tMISSING\n' "$t"
   fi

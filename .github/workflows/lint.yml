@@ -7,11 +7,17 @@ on:
   schedule:
     - cron: "17 6 1 * *"   # monthly: catches nf-core renames and dead links
 
+permissions:
+  contents: read
+
 jobs:
   skills:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install shellcheck
         run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
       - name: Lint skills (frontmatter, size, bash blocks, deprecated tools, nf-core registry, internal paths)
@@ -21,16 +27,19 @@ jobs:
 
   links:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     continue-on-error: true   # third-party FTP mirrors flap; a dead link is a warning, not a release blocker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check external links
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: >-
             --no-progress --timeout 30 --max-retries 2 --accept 200,206,403,429
             --exclude '^https?://(localhost|127\.0\.0\.1)'
             --exclude 'gs://' --exclude 's3://'
-            --exclude '<check current'
-            '.claude/skills/**/*.md' README.md
+            --exclude-private --exclude-link-local --exclude-mail
+            '.claude/skills/**/*.md' README.md CLAUDE.md
           fail: true

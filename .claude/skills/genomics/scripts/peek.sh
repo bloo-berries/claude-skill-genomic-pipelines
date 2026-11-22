@@ -7,8 +7,9 @@ set -uo pipefail
 f=${1:?usage: peek.sh <file> [n]}
 n=${2:-5}
 [ -e "$f" ] || { echo "peek: no such file: $f" >&2; exit 1; }
+real=$(readlink -f "$f" 2>/dev/null || printf '%s' "$f")
 
-size=$(du -h "$f" 2>/dev/null | cut -f1)
+size=$(du -hL "$f" 2>/dev/null | cut -f1)
 echo "== $f  ($size)"
 
 has() { command -v "$1" >/dev/null 2>&1; }
@@ -21,11 +22,14 @@ reader() {            # emit decompressed text stream
   esac
 }
 fq_quick() {          # read count estimate for FASTQ without full decompression
-  local bytes lines
+  local bytes lines total
   if [[ $1 == *.gz ]]; then
-    lines=$(gzip -cd "$1" | head -n 40000 | wc -l)
-    bytes=$(gzip -cd "$1" | head -n 40000 | wc -c)
-    [ "$bytes" -gt 0 ] && echo "  ~$(( $(gzip -l "$1" | awk 'NR==2{print $2}') / (bytes / (lines / 4)) )) reads (gzip-size estimate; unreliable >4 GB)"
+    lines=$(gzip -cd "$1" | head -n 40000 | wc -l | tr -d ' ')
+    bytes=$(gzip -cd "$1" | head -n 40000 | wc -c | tr -d ' ')
+    total=$(gzip -l "$real" 2>/dev/null | awk 'NR==2{print $2}')
+    if [ "${lines:-0}" -ge 4 ] && [ "${bytes:-0}" -gt 0 ] && [ -n "${total:-}" ]; then
+      echo "  ~$(( total / (bytes / (lines / 4)) )) reads (gzip-size estimate; unreliable >4 GB)"
+    fi
   fi
 }
 
@@ -51,6 +55,8 @@ case "$f" in
       echo "-- first $n records (cut to 150 chars)"
       bcftools view -H "$f" | head -n "$n" | cut -c1-150
       [ -e "$f.tbi" ] || [ -e "$f.csi" ] || echo "  WARNING: no index"
+    elif [[ $f == *.bcf ]]; then
+      echo "  binary BCF; install bcftools to inspect (no text fallback: never dump BGZF bytes into context)"
     else
       reader "$f" | grep -v '^##' | head -n "$((n + 1))" | cut -c1-150
     fi

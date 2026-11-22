@@ -16,11 +16,11 @@ Expert in GA4GH-style variant benchmarking: picks the truth set and confident re
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh hap.py som.py rtg truvari bcftools bedtools tabix docker singularity`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" hap.py som.py rtg truvari bcftools bedtools tabix docker singularity || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version. hap.py has no conda build for recent Python; run it from `jmcdani20/hap.py:v0.3.12` (the image used by DeepVariant's own case studies; `pkrusche/hap.py` is the legacy upstream image). Truvari: `pip install truvari==5.5.0` or `quay.io/biocontainers/truvari`.
 
@@ -86,7 +86,7 @@ SAMPLE=HG002
 bcftools view -f PASS,. -s "${SAMPLE}" -Ou "${QUERY}" \
   | bcftools norm -f "${REF}" -m -any -Oz -o query.norm.vcf.gz
 tabix -f query.norm.vcf.gz
-bash "${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh" "${REF}" query.norm.vcf.gz truth/*.vcf.gz truth/*.bed
+bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" "${REF}" query.norm.vcf.gz truth/*.vcf.gz truth/*.bed
 ```
 
 Validate: `bcftools stats query.norm.vcf.gz | grep -E '^SN|^TSTV'` (Ti/Tv sanity before spending compute).
@@ -111,7 +111,7 @@ docker run --rm -u "$(id -u):$(id -g)" -v "${PWD}:/data" -w /data jmcdani20/hap.
   --pass-only -o "${OUTDIR}/HG002"
 ```
 
-Validate: `grep -E '^Type,|,ALL,|,PASS,' happy_out/HG002.summary.csv | cut -d, -f1-3,10-13` (columns: Type, Filter, TRUTH.TOTAL … METRIC.Recall, Precision, Frac_NA, F1_Score). WES/panel: add `-T "${TARGETS}"`. Build the SDF once: `rtg format -o ref/GRCh38.sdf "${REF}"`. Without the SDF hap.py builds one per run (slow). Stratification TSV name differs by release; `ls truth/GRCh38@all/*.tsv`.
+Validate: `grep -E '^Type,|,ALL,|,PASS,' happy_out/HG002.summary.csv | cut -d, -f1-3,11-14` (columns: Type, Filter, TRUTH.TOTAL … 11 METRIC.Recall, 12 METRIC.Precision, 13 METRIC.Frac_NA, 14 METRIC.F1_Score). WES/panel: add `-T "${TARGETS}"`. Build the SDF once: `rtg format -o ref/GRCh38.sdf "${REF}"`. Without the SDF hap.py builds one per run (slow). Stratification TSV name differs by release; `ls truth/GRCh38@all/*.tsv`.
 
 4. Small variants, rtg vcfeval directly (faster; gives ROC by QUAL/GQ; use when hap.py's Python 2 image is unavailable).
 
@@ -178,7 +178,7 @@ Defaults for "is this result worth believing"; assay-specific pass marks are in 
 | hap.py `METRIC.Frac_NA` (query calls outside confident region) | WGS ≤ 0.15; WES ≤ 0.6 | high Frac_NA with low recall → wrong BED or build; WES is expected to be mostly outside |
 | `FP.gt` share of FP (SNP) | ≤ 30 % | mostly genotype errors → check ploidy/sex (`--gender`), low depth |
 | `FP.al` share of FP (INDEL) | ≤ 20 % | allele mismatches → normalisation/representation issue, retry with vcfeval engine |
-| Ti/Tv (query, PASS) | WGS 2.0–2.1; WES 2.8–3.1 | cheap proxy before benchmarking; GRCh37 WES ≈ 3.0; non-human differs |
+| Ti/Tv (query, PASS) | WGS 2.0–2.1; WES 2.8–3.3 | cheap proxy before benchmarking; GRCh37 WES ≈ 3.0; non-human differs; canonical values in `.claude/skills/genomics-qc/SKILL.md` |
 | Het/hom-alt (WGS) | 1.4–2.0 | ancestry-dependent; far outside → contamination, wrong sample, ploidy |
 | Truvari `TP-base`/`TP-comp` gap | ≤ 5 % | large gap → many-to-one matching; inspect `--pick` and `--multimatch` |
 | SV calls < `--sizemin` | excluded by design | report size bins (50–100, 100–1k, 1k–10k, >10k) |

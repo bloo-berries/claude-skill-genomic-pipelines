@@ -17,11 +17,11 @@ Expert in germline annotation (VEP 116 / SnpEff / ANNOVAR), consequence-aware fi
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh bcftools tabix bgzip vep snpEff table_annovar.pl slivar CrossMap gatk java python3 Rscript`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" bcftools tabix bgzip vep snpEff table_annovar.pl slivar CrossMap gatk java python3 Rscript || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version.
 
@@ -88,7 +88,7 @@ docker run --rm -u "$(id -u)" -v "$PWD":/work -v "${CACHE}":/cache -v "${PLUG}":
 tabix -f -p vcf "${OUT}"
 ```
 
-Validate: `bcftools +split-vep -l "${OUT}" | grep -c -E 'MANE_SELECT|ClinVar_CLNSIG|CADD_PHRED|SpliceAI_pred_DS_AG|am_pathogenicity|REVEL|LOEUF'` prints `7`; `bcftools view -H "${OUT}" | wc -l` equals the input count.
+Validate: `bcftools +split-vep -l "${OUT}" | grep -c -x -E 'MANE_SELECT|ClinVar_CLNSIG|CADD_PHRED|SpliceAI_pred_DS_AG|am_pathogenicity|REVEL|LOEUF'` prints `7` (`-x` anchors whole lines so dbNSFP `REVEL_score`/`LOEUF`-like fields are not double-counted); `bcftools view -H "${OUT}" | wc -l` equals the input count.
 
 Drop `--pick` (and add `--flag_pick` instead) when: ClinGen VCEP specs name a non-MANE transcript, splice/UTR analysis, per-transcript NMD/LoF review, or gene-burden counting. Plugin data files are licensed separately (dbNSFP academic vs commercial branch, CADD, REVEL); record each file's version.
 

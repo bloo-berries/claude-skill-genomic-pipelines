@@ -54,7 +54,7 @@ MT=chrM
 samtools idxstats "${SAMPLE}.raw.bam" \
   | awk -v mt="${MT}" '{t+=$3} $1==mt{m=$3} END{printf "MT_fraction\t%.4f\n", m/t}' \
   | tee "${SAMPLE}.mt_fraction.tsv"
-samtools view -b -q 30 -F 1804 -f 2 -e 'rname!="chrM" && mrnm!="chrM"' \
+samtools view -b -q 30 -F 1804 -f 2 -e 'rname!="chrM" && mrname!="chrM"' \
   "${SAMPLE}.raw.bam" -o "${SAMPLE}.noMT.bam"
 samtools index "${SAMPLE}.noMT.bam"
 ```
@@ -229,7 +229,7 @@ ENCODE ATAC-seq standards (`https://www.encodeproject.org/atac-seq/`, updated Ju
 | Peaks all 150 bp wide and offset 75 bp from fragment centres | `--shift -75 --extsize 150` applied with `-f BAMPE`, or applied to an already-shifted BAM | Mode A (BAMPE, no shift) or Mode B (BED cut sites, shift once) — never both |
 | `alignmentSieve` output rejected by `samtools index` | unsorted output | `samtools sort` first (step 4) |
 | MT fraction reported as 2 % but library looked poor | fraction computed after dedup | recompute on `raw.bam` with `idxstats` |
-| `samtools view -e 'rname!="chrM"'` leaves mates on chrM | expression lacked `mrnm` clause, or contig is `MT` | include `mrnm!="chrM"`; check `idxstats` names |
+| `samtools view -e 'rname!="chrM"'` leaves mates on chrM | expression lacked `mrname` clause, or contig is `MT` | include `mrname!="chrM"`; check `idxstats` names |
 | `grep -v chrM` produced a truncated/invalid BAM | text grep removed header lines or reads with `chrM` in tags | use `-e` expressions or region lists |
 | `TSSEscore` error "no slot of name" / "GAlignments expected" | a file path or GRanges was passed | `readBamFile`/`readGAlignments` first (step 6) |
 | TSS score 3 on mouse data that looks fine in IGV | compared against hg38 row; mm10 thresholds are higher (10/15) but computed on RefSeq mm10 TSS | use the matching annotation row and the same TSS set |

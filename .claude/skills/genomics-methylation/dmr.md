@@ -72,11 +72,11 @@ Note: multi-factor mode has no `delta` argument; filter DMRs post hoc by mean β
 
 ```bash
 set -euo pipefail
-GTF=ref/gencode.v48.annotation.gtf.gz
+GTF=ref/gencode.v50.annotation.gtf.gz
 CGI=ref/cpgIslandExt.GRCh38.bed
 DMR=dmr/DSS_dmrs.bed
 bedtools intersect -wa -wb -a "${DMR}" -b "${CGI}" | cut -f1-3 | sort -u > dmr/dmr_in_cgi.bed
-zcat "${GTF}" | awk '$3=="gene"' | bedtools closest -d -a <(sort -k1,1 -k2,2n "${DMR}") -b <(sort -k1,1 -k4,4n - | awk 'BEGIN{OFS="\t"}{print $1,$4-1,$5,$0}' | cut -f1-3,12) > dmr/dmr_nearest_gene.tsv
+zcat "${GTF}" | awk '$3=="gene"' | bedtools closest -d -a <(sort -k1,1 -k2,2n "${DMR}") -b <(sort -k1,1 -k4,4n - | awk 'BEGIN{OFS="\t"}{match($0,/gene_name "[^"]+"/); print $1,$4-1,$5,substr($0,RSTART+11,RLENGTH-12)}') > dmr/dmr_nearest_gene.tsv
 ```
 Use `annotatr` (R) for promoter/shore/shelf/enhancer categories with GRCh38/GRCm39 builds; GTF acquisition in `.claude/skills/genomics/reference.md`.
 

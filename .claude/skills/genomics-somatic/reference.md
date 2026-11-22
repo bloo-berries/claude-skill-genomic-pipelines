@@ -25,7 +25,7 @@ mkdir -p ${OUT}
 NSM=$(samtools view -H ${NBAM} | awk '/^@RG/{for(i=1;i<=NF;i++) if($i~/^SM:/){sub("SM:","",$i); print $i; exit}}')
 TSM=$(samtools view -H ${TBAM} | awk '/^@RG/{for(i=1;i<=NF;i++) if($i~/^SM:/){sub("SM:","",$i); print $i; exit}}')
 test -n "${NSM}" && test -n "${TSM}" && test "${NSM}" != "${TSM}"
-bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh ${REF} ${TBAM} ${NBAM} ${GNOMAD} ${PON} ${COMMON}
+bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" ${REF} ${TBAM} ${NBAM} ${GNOMAD} ${PON} ${COMMON}
 
 gatk SplitIntervals -R ${REF} -L ${INTERVALS} --scatter-count ${SCATTER} -O ${OUT}/intervals
 ls ${OUT}/intervals/*.interval_list | wc -l

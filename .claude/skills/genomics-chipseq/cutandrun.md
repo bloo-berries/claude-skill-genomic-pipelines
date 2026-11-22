@@ -75,7 +75,7 @@ Scale factor = `CONST / spike fragments` (Henikoff lab convention `CONST=10000`;
 set -euo pipefail
 SAMPLE=H3K27me3_rep1
 IGG=IgG_rep1
-gatk MarkDuplicates -I "${IGG}.target.bam" -O "${IGG}.dedup.bam" -M "${IGG}.dup_metrics.txt" --REMOVE_DUPLICATES true --CREATE_INDEX true
+gatk MarkDuplicates -I "${IGG}.target.bam" -O "${IGG}.dedup.bam" -M "${IGG}.dup_metrics.txt" --REMOVE_DUPLICATES false --CREATE_INDEX true
 gatk MarkDuplicates -I "${SAMPLE}.target.bam" -O "${SAMPLE}.marked.bam" -M "${SAMPLE}.dup_metrics.txt" --REMOVE_DUPLICATES false --CREATE_INDEX true
 samtools sort -n -@ 4 "${SAMPLE}.marked.bam" \
   | bedtools bamtobed -bedpe -i - \
@@ -83,7 +83,7 @@ samtools sort -n -@ 4 "${SAMPLE}.marked.bam" \
   | sort -k1,1 -k2,2n > "${SAMPLE}.fragments.bed"
 ```
 
-Targets are marked, not removed (decide after reading `PERCENT_DUPLICATION` and NRF); IgG is deduplicated. If removal is warranted for targets, rerun with `--REMOVE_DUPLICATES true`. Blacklist filtering as `SKILL.md` §3 (`bedtools intersect -v` on the fragment BED with `-a`/`-b` works directly on BED). Validation: `awk '{print $3-$2}' "${SAMPLE}.fragments.bed" | sort -n | uniq -c | sort -k1,1nr | head` shows the expected fragment mode.
+Targets are marked, not removed (decide after reading `PERCENT_DUPLICATION` and NRF); IgG duplicates are also only marked and are excluded by flag (`samtools view -F 1024 "${IGG}.dedup.bam"`) when IgG fragments are extracted or counted. Physical removal (`--REMOVE_DUPLICATES true`) on either only when the user asks for it. Blacklist filtering as `SKILL.md` §3 (`bedtools intersect -v` on the fragment BED with `-a`/`-b` works directly on BED). Validation: `awk '{print $3-$2}' "${SAMPLE}.fragments.bed" | sort -n | uniq -c | sort -k1,1nr | head` shows the expected fragment mode.
 
 ### 4. Fragment-size expectations
 
@@ -171,7 +171,7 @@ No ENCODE standard exists for CUT&RUN/CUT&Tag; defaults derive from Meers 2019 (
 | Very low alignment rate | `--end-to-end` on reads with adapter tails | `--local` or trim fully; see `genomics-qc` |
 | Spike factor varies 50× between replicates | kit with trace E. coli, unequal cells, or spike BAM accepted dovetailed/overlapping pairs | check `--no-overlap --no-dovetail`; abandon spike scaling |
 | Nucleosomal ladder in a TF CUT&RUN | over-digestion (MNase time/temperature) | call peaks on sub-120 bp fragments only (`awk '$3-$2<120'`); note in methods |
-| Huge duplicate rate after `--REMOVE_DUPLICATES true` on targets collapsed peaks | genuine tethered duplicates removed | keep duplicates for targets, remove for IgG |
+| Huge duplicate rate after `--REMOVE_DUPLICATES true` on targets collapsed peaks | genuine tethered duplicates removed | keep duplicates for targets; mark IgG and exclude with `-F 1024` |
 | MACS3 finds 10× fewer peaks than SEACR | IgG used as `-c` is deeper than target; MACS3 scales target down | `--scale-to small` or SEACR primary |
 | `bedtools genomecov` errors on chromosome order | fragments BED sorted differently from `.fai` | `sort -k1,1 -k2,2n` and a `.fai` of the same reference (`ref_sanity.sh`) |
 | nf-core/cutandrun reports "spike-in alignment 0 %" | `--spikein_genome` left at E. coli while yeast/Drosophila spike was used | set `--spikein_genome R64-1-1` or `BDGP6`, or `--spikein_fasta` |

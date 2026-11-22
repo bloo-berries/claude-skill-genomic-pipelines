@@ -16,11 +16,11 @@ Expert in germline SNV/indel discovery from Illumina/MGI short reads: alignment,
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh gatk bwa-mem2 samtools bcftools docker singularity glnexus_cli somalier mosdepth verifybamid2 nextflow`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" gatk bwa-mem2 samtools bcftools docker singularity glnexus_cli somalier mosdepth VerifyBamID nextflow || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version. Pins used below (verified 2026-11-22): GATK 4.7.0.0, DeepVariant 1.10.0, GLnexus v1.4.1 (`ghcr.io/dnanexus-rnd/glnexus:v1.4.1`), somalier v0.3.7, nf-core/sarek 3.12.0.
 
@@ -93,16 +93,17 @@ REF=/refs/GRCh38/Homo_sapiens_assembly38.fasta
 SAMPLE=NA12878
 SITES=/refs/somalier/sites.hg38.vcf.gz
 somalier extract -d somalier/ --sites ${SITES} -f ${REF} ${SAMPLE}.dedup.bam
-somalier relate -o somalier/cohort somalier/*.somalier
-verifybamid2 --SVDPrefix /refs/verifybamid2/1000g.phase3.100k.b38.vcf.gz.dat --Reference ${REF} --BamFile ${SAMPLE}.dedup.bam --NumThread 4 --Output ${SAMPLE}.vbid2
+somalier relate --infer -o somalier/cohort somalier/*.somalier
+VerifyBamID --SVDPrefix /refs/verifybamid2/1000g.phase3.100k.b38.vcf.gz.dat --Reference ${REF} --BamFile ${SAMPLE}.dedup.bam --NumThread 4 --Output ${SAMPLE}.vbid2
 ```
 
-Validate: `cut -f1,4,5 somalier/cohort.samples.tsv | head` (`sex` column 1=male 2=female; compare to metadata) and `grep -v '^#' ${SAMPLE}.vbid2.selfSM | cut -f7` (FREEMIX). somalier `relate` also flags unexpected duplicates/relatedness in cohorts. `sites.hg38.vcf.gz` ships with the somalier release page.
+Validate: `cut -f2,5,7 somalier/cohort.samples.tsv | head` (sample_id, inferred sex 1=male 2=female, pedigree sex; compare to metadata) and `grep -v '^#' ${SAMPLE}.vbid2.selfSM | cut -f7` (FREEMIX). somalier `relate` also flags unexpected duplicates/relatedness in cohorts. `sites.hg38.vcf.gz` ships with the somalier release page.
 
 ### 3a. HaplotypeCaller path (with BQSR)
 
 ```bash
 set -euo pipefail
+MODE=WES
 REF=/refs/GRCh38/Homo_sapiens_assembly38.fasta
 SAMPLE=NA12878
 DBSNP=/refs/GRCh38/Homo_sapiens_assembly38.dbsnp138.vcf
@@ -110,20 +111,22 @@ MILLS=/refs/GRCh38/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz
 KNOWN_INDELS=/refs/GRCh38/Homo_sapiens_assembly38.known_indels.vcf.gz
 TARGETS=targets.bed
 PAD=100
+INTERVAL_ARGS=()
+[ "${MODE}" = WES ] && INTERVAL_ARGS=(-L "${TARGETS}" -ip "${PAD}")
 gatk --java-options "-Xmx8g" BaseRecalibrator -R ${REF} -I ${SAMPLE}.dedup.bam \
   --known-sites ${DBSNP} --known-sites ${MILLS} --known-sites ${KNOWN_INDELS} \
-  -L ${TARGETS} -ip ${PAD} -O ${SAMPLE}.recal.table
+  "${INTERVAL_ARGS[@]}" -O ${SAMPLE}.recal.table
 gatk --java-options "-Xmx8g" ApplyBQSR -R ${REF} -I ${SAMPLE}.dedup.bam \
   --bqsr-recal-file ${SAMPLE}.recal.table -O ${SAMPLE}.bqsr.bam
 gatk --java-options "-Xmx8g" HaplotypeCaller -R ${REF} -I ${SAMPLE}.bqsr.bam \
-  -D ${DBSNP} -L ${TARGETS} -ip ${PAD} -ERC GVCF \
+  -D ${DBSNP} "${INTERVAL_ARGS[@]}" -ERC GVCF \
   -G StandardAnnotation -G StandardHCAnnotation -G AS_StandardAnnotation \
   --native-pair-hmm-threads 4 -O ${SAMPLE}.g.vcf.gz
 ```
 
 Validate: `bcftools view -H ${SAMPLE}.g.vcf.gz | head -1` (first record present) and `bcftools query -f '%ID\n' -i 'ID!="."' ${SAMPLE}.g.vcf.gz | head -1` (dbSNP IDs attached).
 
-WGS: drop `-L/-ip` from HaplotypeCaller or, faster, scatter by interval shards (`gatk SplitIntervals --scatter-count 24`, one HC per shard with `-L shard.interval_list`, then `gatk GatherVcfs -I … -O ${SAMPLE}.g.vcf.gz` + `tabix`); generation and gather commands in `reference.md`. ~4 GB heap per shard is enough; 8 GB for whole-genome single run. Male X/Y: run non-PAR X/Y intervals separately with `--ploidy 1` and gather (intervals in `reference.md`).
+WGS: `MODE=WGS` or, faster, scatter by interval shards (`gatk SplitIntervals --scatter-count 24`, one HC per shard with `-L shard.interval_list`, then `gatk GatherVcfs -I … -O ${SAMPLE}.g.vcf.gz` + `tabix`); generation and gather commands in `reference.md`. ~4 GB heap per shard is enough; 8 GB for whole-genome single run. Male X/Y: run non-PAR X/Y intervals separately with `--ploidy 1` and gather (intervals in `reference.md`).
 
 ### 3b. DeepVariant path (dedup BAM, no BQSR)
 
@@ -209,16 +212,17 @@ set -euo pipefail
 REF=/refs/GRCh38/Homo_sapiens_assembly38.fasta
 VCF=cohort.filtered.vcf.gz
 OUT=cohort.final.vcf.gz
-bcftools norm -f ${REF} -m -both --check-ref w -Oz -o ${OUT} ${VCF}
+bcftools norm -f ${REF} -m -both --check-ref w -Oz -o ${OUT} ${VCF} 2> ${OUT%.vcf.gz}.norm.log
 bcftools index -t ${OUT}
 bcftools stats -f PASS -F ${REF} -s - ${OUT} > ${OUT%.vcf.gz}.stats.txt
 ```
 
-Validate: `grep -E '^TSTV' ${OUT%.vcf.gz}.stats.txt` and `grep -c 'REF_MISMATCH' ${OUT%.vcf.gz}.stats.txt` (must be 0; non-zero ⇒ wrong reference).
+Validate: `grep -E '^TSTV' ${OUT%.vcf.gz}.stats.txt` and `grep -c 'REF_MISMATCH' ${OUT%.vcf.gz}.norm.log` (must be 0; non-zero ⇒ wrong reference; the warnings go to stderr, not the stats file).
 
 ### Accelerated equivalents (same outputs, record version)
 
 ```bash
+# alternatives: run one (Parabricks germline, Parabricks DeepVariant, Sentieon DNAscope); variables as in steps 1–3
 pbrun germline --ref ${REF} --in-fq ${R1} ${R2} "@RG\tID:${FLOWCELL_LANE}\tSM:${SAMPLE}\tPL:ILLUMINA\tLB:${LIB}" --knownSites ${DBSNP} --out-bam ${SAMPLE}.bam --out-variants ${SAMPLE}.g.vcf.gz --gvcf --num-gpus 1
 pbrun deepvariant --ref ${REF} --in-bam ${SAMPLE}.dedup.bam --out-variants ${SAMPLE}.dv.vcf.gz --mode shortread --num-gpus 1
 sentieon driver -t ${THREADS} -r ${REF} -i ${SAMPLE}.dedup.bam --algo DNAscope --model ${SENTIEON_MODEL} --emit_mode gvcf ${SAMPLE}.g.vcf.gz
@@ -245,18 +249,20 @@ Scratch rule: reserve ≥ 4× final BAM size during alignment + markdup. Pass `-
 
 | Metric | Default | Rationale / when to deviate |
 |---|---|---|
-| Mapped reads (`samtools flagstat`) | ≥ 98 % WGS, ≥ 95 % WES | Lower ⇒ wrong reference/species, adapter read-through, contamination; check `peek.sh` and a BLAST of 100 unmapped reads |
-| Duplicate rate | ≤ 10 % PCR-free WGS, ≤ 20 % PCR WGS, ≤ 30 % WES | Higher ⇒ low input/overamplification; high-depth (>60×) WES legitimately higher; NovaSeq X patterned flowcells add optical duplicates |
+| Mapped reads (`samtools flagstat`) | ≥ 98 % WGS and WES (WARN 95–98 %, FAIL < 95 %) | Lower ⇒ wrong reference/species, adapter read-through, contamination; check `peek.sh` and a BLAST of 100 unmapped reads |
+| Duplicate rate (marked, not removed) | < 10 % PCR-free WGS (WARN 10–20 %), ≤ 20 % PCR WGS, < 25 % WES (WARN 25–40 %, FAIL > 40 %) | Higher ⇒ low input/overamplification; high-depth (>60×) WES legitimately higher; NovaSeq X patterned flowcells add optical duplicates |
 | Mean coverage (`mosdepth -n --fast-mode`) | ≥ 30× WGS; ≥ 80× WES mean on-target | Clinical WGS often ≥ 40×; trios tolerate 25× |
-| Coverage uniformity | ≥ 90 % of genome ≥ 10× (WGS); ≥ 90 % of targets ≥ 20× (WES) | GC-biased libraries fail this with acceptable mean; report `mosdepth` thresholds |
+| Coverage uniformity | ≥ 90 % of genome ≥ 10× (WGS); ≥ 95 % of targets ≥ 20× (WES; WARN 90–95 %) | GC-biased libraries fail this with acceptable mean; report `mosdepth --thresholds` |
 | On-target fraction (WES) | ≥ 60 % | Kit-dependent; <40 % ⇒ wrong BED or failed capture |
 | Insert size median | 300–500 bp, unimodal | Bimodal ⇒ adapter dimers or mixed libraries; <200 bp ⇒ overlapping mates, lower effective depth |
-| Ti/Tv (PASS, `bcftools stats`) | 2.0–2.1 WGS; 2.8–3.1 WES | Lower ⇒ false positives (typical for unfiltered/hard-filtered); recompute on targets only for WES |
+| Ti/Tv (PASS, `bcftools stats`) | 2.0–2.1 WGS; 2.8–3.3 WES | Lower ⇒ false positives (typical for unfiltered/hard-filtered); recompute on targets only for WES |
 | Het/hom-alt ratio | ≈ 1.5–2.0 (WGS, European ancestry); varies by ancestry | <1.2 ⇒ consanguinity/LOH; >2.5 ⇒ contamination or caller issue |
-| Contamination FREEMIX (VerifyBamID2) | < 0.03 | 0.03–0.05 investigate; >0.05 exclude from cohort filtering |
+| Contamination FREEMIX (VerifyBamID2) | < 0.01 (WARN 0.01–0.03, FAIL > 0.03 germline) | Somatic normals often enforced < 0.02; low depth (<5×) or wrong panel build inflates it; > 0.03 exclude from cohort filtering |
 | Sex (somalier) | matches metadata | Mismatch ⇒ sample swap; treat as blocker before joint calling |
 | Variant count (PASS, WGS GRCh38) | 4.0–5.0 M SNVs, 0.8–1.0 M indels; WES ≈ 20–40 k | Outside ⇒ wrong intervals, wrong ref, or filtering failure |
 | dbSNP concordance (`bcftools stats` with `-D`/ID) | ≥ 97 % known WGS | Lower ⇒ FP burden or non-human-like ancestry representation |
+
+Canonical PASS/WARN/FAIL values live in `.claude/skills/genomics-qc/SKILL.md`; this table restates them for the calling context.
 
 Raw-read QC (FastQC/fastp, adapter content, per-base quality) is `.claude/skills/genomics-qc/SKILL.md`.
 
@@ -307,7 +313,7 @@ Add `sex` (`XX`/`XY`) column for ploidy-aware steps. Start from BAM/CRAM with he
 - Truth sets: run a GIAB sample (HG001/NA12878, HG002–HG007; IDs and URLs in `reference.md`) through the identical pipeline and benchmark with `hap.py`/`vcfdist` per `.claude/skills/genomics-benchmark/SKILL.md`. Expected 30× WGS DeepVariant 1.10 or GATK+VQSR: SNV F1 ≥ 0.995, indel F1 ≥ 0.99 in GIAB v4.2.1 high-confidence regions (approximate; stratify by difficult regions).
 - Without truth: `bcftools stats -f PASS -s -` must show Ti/Tv per table above, per-sample variant counts within 10 % of cohort median, singletons < 5 % of variants per sample, `nMissing` low and even across samples; `bcftools +smpl-stats`/`somalier relate` confirms sex and expected relatedness.
 - Mendelian check for trios: `bcftools +mendelian2 -p ped.txt` error rate < 1 % PASS sites (notes in `reference.md`).
-- Reference sanity after `bcftools norm --check-ref w`: zero `REF_MISMATCH` lines.
+- Reference sanity after `bcftools norm --check-ref w`: zero `REF_MISMATCH` lines in the captured stderr (`${OUT%.vcf.gz}.norm.log`).
 
 ## Additional resources
 

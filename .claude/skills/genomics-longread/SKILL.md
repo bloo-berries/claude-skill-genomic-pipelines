@@ -20,11 +20,11 @@ Expert in Oxford Nanopore and PacBio HiFi DNA/RNA analysis. Outputs are pinned c
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh dorado pod5 minimap2 pbmm2 samtools bcftools cramino NanoPlot pycoQC run_clair3.sh whatshap longphase hiphase sniffles sawfish pbsv cuteSV modkit aligned_bam_to_cpg_scores straglr.py trgt hifiasm flye isoseq lima oarfish isoquant`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" dorado pod5 minimap2 pbmm2 samtools bcftools cramino NanoPlot pycoQC run_clair3.sh whatshap longphase hiphase sniffles sawfish pbsv cuteSV modkit aligned_bam_to_cpg_scores straglr.py trgt hifiasm flye isoseq lima oarfish isoquant || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version. Verified versions (2026-11): dorado 2.1.2 (DNA models `hac@v6.0.0`, `sup@v5.2.0`), pod5 0.3.49, minimap2 2.31, pbmm2 26.2.0 (SMRT Link 26.2), samtools ≥1.20, Clair3 2.0.5 (PyTorch; v1 TF models incompatible), DeepVariant 1.10.0, WhatsHap 2.8, longphase 2.1.2, HiPhase 1.7.1, Sniffles 2.8.1, sawfish 2.3.1, pbsv 2.11.0, cuteSV 2.1.4, modkit 0.6.4, pb-CpG-tools 3.0.0, Straglr 1.5.6, TRGT 5.1.0, hifiasm 0.25.0, Flye 2.9.7, isoseq 4.3.0 (bioconda tag v26.2.0), lima 26.2.1, bambu 3.12.1, oarfish 0.13.0, IsoQuant 4.1.0, FLAIR 3.0.1, NanoPlot 1.48.0, cramino 2.0.0, pycoQC 2.5.2 (unmaintained since 2020; summary-file QC only), Severus 1.7, SAVANA 1.3.8, QUAST 5.3.0, merqury 1.4.1, BUSCO 6.1.0.
 
@@ -96,6 +96,7 @@ Validate: `samtools view ${SAMPLE}.bam | head -1000 | grep -c 'MM:Z'` (>0) and `
 3. **QC.** 
 
 ```bash
+set -euo pipefail
 cramino -t 8 --hist --karyotype "${SAMPLE}.bam" > "${SAMPLE}.cramino.txt"
 NanoPlot -t 8 --bam "${SAMPLE}.bam" --N50 -o nanoplot_"${SAMPLE}"
 ```

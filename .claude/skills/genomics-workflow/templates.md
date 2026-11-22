@@ -306,25 +306,28 @@ REF=/data/ref/GRCh38.fa
 IMG=/shared/containers/bwa-mem2_2.3_samtools_1.25.sif
 OUTDIR=/data/results/bam
 THREADS=${SLURM_CPUS_PER_TASK}
-SCRATCH=${SLURM_TMPDIR:-/scratch/${USER}/${SLURM_JOB_ID}}
+# Per-job scratch: always a fresh directory so the EXIT trap can never remove a shared SLURM_TMPDIR.
+SCRATCH=$(mktemp -d -p "${SLURM_TMPDIR:-/scratch/${USER}}" "align.${SLURM_JOB_ID}.XXXXXX")
 
-mkdir -p "${OUTDIR}" "${SCRATCH}"
+mkdir -p "${OUTDIR}"
 trap 'rm -rf "${SCRATCH}"' EXIT
 
 LINE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "${SAMPLES}")
 SAMPLE=$(cut -f1 <<< "${LINE}")
 R1=$(cut -f2 <<< "${LINE}")
 R2=$(cut -f3 <<< "${LINE}")
-[[ -n "${SAMPLE}" && -s "${R1}" && -s "${R2}" ]] || { echo "bad line ${SLURM_ARRAY_TASK_ID}" >&2; exit 2; }
+# Samplesheet fields are data, never shell: restrict the sample ID and pass paths as arguments.
+[[ "${SAMPLE}" =~ ^[A-Za-z0-9._-]+$ && -s "${R1}" && -s "${R2}" ]] || { echo "bad line ${SLURM_ARRAY_TASK_ID}: ${LINE}" >&2; exit 2; }
 
 echo "$(date -Is) start ${SAMPLE} on ${HOSTNAME} cpus=${THREADS} mem=${SLURM_MEM_PER_NODE:-NA}"
-apptainer exec --bind /data,"${SCRATCH}" "${IMG}" bash -c "
+apptainer exec --bind /data,"${SCRATCH}" "${IMG}" bash -c '
   set -euo pipefail
-  bwa-mem2 mem -t ${THREADS} -R '@RG\tID:${SAMPLE}\tSM:${SAMPLE}\tPL:ILLUMINA' ${REF} ${R1} ${R2} \
-    | samtools sort -@ 4 -m 2G -T ${SCRATCH}/${SAMPLE}.sort -o ${SCRATCH}/${SAMPLE}.bam -
-  samtools index ${SCRATCH}/${SAMPLE}.bam
-  samtools quickcheck ${SCRATCH}/${SAMPLE}.bam
-"
+  threads=$1; sample=$2; ref=$3; r1=$4; r2=$5; scratch=$6
+  bwa-mem2 mem -t "${threads}" -R "@RG\tID:${sample}\tSM:${sample}\tPL:ILLUMINA" "${ref}" "${r1}" "${r2}" \
+    | samtools sort -@ 4 -m 2G -T "${scratch}/${sample}.sort" -o "${scratch}/${sample}.bam" -
+  samtools index "${scratch}/${sample}.bam"
+  samtools quickcheck "${scratch}/${sample}.bam"
+' _ "${THREADS}" "${SAMPLE}" "${REF}" "${R1}" "${R2}" "${SCRATCH}"
 mv "${SCRATCH}/${SAMPLE}.bam" "${SCRATCH}/${SAMPLE}.bam.bai" "${OUTDIR}/"
 apptainer exec "${IMG}" bash -c 'bwa-mem2 version; samtools --version | head -1' > "${OUTDIR}/${SAMPLE}.versions.txt"
 echo "$(date -Is) done ${SAMPLE}"
@@ -354,7 +357,7 @@ dependencies:
       - truvari==5.5.0
 ```
 
-Check each pin exists before shipping: `mamba search -c bioconda samtools=1.25` (or `mamba repoquery search`). Verified today on bioconda: samtools 1.25, bcftools 1.25, bwa-mem2 2.3, gatk4 4.6.2.0, multiqc 1.35, snakemake-minimal 9.27.2, truvari 5.5.0. Re-check before copying (`https://anaconda.org/bioconda/<pkg>`).
+Check each pin exists before shipping: `mamba search -c bioconda samtools=1.25` (or `mamba repoquery search`). bioconda lags GitHub: gatk4 4.6.2.0 on bioconda vs 4.7.0.0 upstream on 2026-11-22; pin whichever channel you install from and record it. Other bioconda versions seen the same day: samtools 1.25, bcftools 1.25, bwa-mem2 2.3, multiqc 1.35, snakemake-minimal 9.27.2, truvari 5.5.0. Re-check before copying (`https://anaconda.org/bioconda/<pkg>`).
 
 Lock and reproduce:
 

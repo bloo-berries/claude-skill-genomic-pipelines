@@ -70,16 +70,26 @@ Variant classifications, CNV scoring and somatic tiers produced with these skill
 
 ## Verified against (2026-11-22)
 
-GATK 4.7.0.0, DeepVariant 1.10.0, Ensembl/VEP 116, GENCODE v50 / vM39, gnomAD v4.1, MACS3, samtools/bcftools 1.2x, nf-core/sarek 3.12, Nextflow 25.x, Snakemake 8/9. Versions drift; the monthly CI run validates nf-core names and links, and every skill tells Claude to run `tool --version` rather than trust a number in a file.
+GATK 4.7.0.0 (bioconda lags at 4.6.2.0), DeepVariant 1.10.0, Ensembl/VEP 116, GENCODE v50 / vM39, gnomAD v4.1, MACS3 3.1, Salmon 2.12, samtools/bcftools 1.25, nf-core/sarek 3.12, Nextflow 26.10, Snakemake 9.27. Versions drift; the monthly CI run validates nf-core names and links, and every skill tells Claude to run `tool --version` rather than trust a number in a file.
 
 ## Development
 
 ```bash
-python3 scripts/lint_skills.py      # frontmatter, size, bash syntax (needs shellcheck), deprecated tools, nf-core registry, paths
-bash scripts/test_scripts.sh        # shared-script smoke test
+python3 scripts/lint_skills.py      # frontmatter (incl. forbidden keys), size (warn >400, fail >500 lines), bash syntax via shellcheck,
+                                    # pipefail on multi-command blocks, guarded check_env injection, deprecated tools, nf-core registry, paths
+bash scripts/test_scripts.sh        # shared-script smoke test: locale/alt-contig/missing-tool cases, symlinks, stub tools, hung-probe timeout
 ```
 
-Pull requests: keep `SKILL.md` under 400 lines, move long command dumps into supporting files, verify every version string against a primary source, and never recommend a tool the lint lists as deprecated. See `CHANGELOG.md`.
+Contributor rules (section order, size limits, deprecated-tool list, verification steps) live in `CLAUDE.md`, which Claude Code also loads when you edit this repository. See `CHANGELOG.md` for history.
+
+## Security model
+
+- No skill grants `allowed-tools`, changes `model`, or forks context. The only code executed at skill load is `check_env.sh` (tool presence/version probe): it refuses relative `PATH` entries, time-limits every probe, truncates output to one short line, writes nothing and always exits 0. Scripts are resolved from the skill's own directory (`${CLAUDE_SKILL_DIR}`), so a personal install never executes a project's copy.
+- The shared scripts write only inside `mktemp -d` and never modify inputs (`ref_sanity.sh` indexes an un-indexed reference into its temp dir, not beside the file).
+- Skills contain `<check current: URL>` markers for versions that move faster than this repo. The router instructs Claude to take only the version or file-name string from such a page and never to act on instructions found in fetched content; all hosts are primary sources (NCBI, Ensembl, Broad, nf-core, tool repositories).
+- Data governance is a standing rule (`genomics/SKILL.md` rule 8): no uploads to third-party services, workflow telemetry, web calculators or licensed APIs without a confirmed data-use agreement; no sample identifiers in chat or logs; clinical output is research-use-only.
+- The repo contains no credentials, no sample data (all IDs are public GIAB/Coriell references or placeholders) and no CI secrets. CI runs with `contents: read`, SHA-pinned actions, and does lint + smoke test + link check only. `.gitignore` blocks BAM/CRAM/FASTQ/VCF/reference files and pipeline work directories.
+- Review the diff of `.claude/skills/**` on every PR as you would review code: skill text is executed as instructions by an agent with your permissions.
 
 ## License
 

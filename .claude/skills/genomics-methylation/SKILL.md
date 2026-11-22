@@ -15,11 +15,11 @@ Expert in conversion-based methylation sequencing: library-type detection, three
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh bismark bowtie2 bwameth.py bwa-mem2 MethylDackel trim_galore samtools nextflow Rscript metilene`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" bismark bowtie2 bwameth.py bwa-mem2 MethylDackel trim_galore samtools nextflow Rscript metilene || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version.
 
@@ -69,7 +69,7 @@ samtools faidx "${REF}"
 bismark_genome_preparation --bowtie2 --parallel 4 "$(dirname "${REF}")"
 bwameth.py index-mem2 "${REF}"
 ```
-Validate: `ls "$(dirname "${REF}")"/Bisulfite_Genome/CT_conversion/*.bt2l | head -1 && ls "${REF}".bwameth.c2t*`
+Validate: `ls "$(dirname "${REF}")"/Bisulfite_Genome/CT_conversion/*.bt2 "$(dirname "${REF}")"/Bisulfite_Genome/CT_conversion/*.bt2l 2>/dev/null | head -n 1 && ls "${REF}".bwameth.c2t*` (bowtie2 writes `.bt2l` only for genomes > 4 Gbp; human/mouse get `.bt2`).
 
 2. Trim by library type (adapter/quality defaults are Trim Galore's; this step only sets conversion-specific clipping).
 
@@ -118,7 +118,7 @@ SAMPLE=S1
 deduplicate_bismark --paired --bam -o "${SAMPLE}" --output_dir dedup "align/${SAMPLE}_R1_val_1_bismark_bt2_pe.bam"
 samtools sort -@ 8 -o "dedup/${SAMPLE}.sorted.bam" "dedup/${SAMPLE}.deduplicated.bam" && samtools index "dedup/${SAMPLE}.sorted.bam"
 ```
-For bwa-meth BAMs: `samtools markdup -r -@ 8 align/${SAMPLE}.bam dedup/${SAMPLE}.bam` (after `samtools fixmate -m` on a name-sorted BAM). Validate: `grep 'Total number duplicated' dedup/${SAMPLE}.deduplication_report.txt` or `samtools flagstat dedup/${SAMPLE}.bam | grep duplicates`.
+For bwa-meth BAMs: `samtools markdup -@ 8 align/${SAMPLE}.bam dedup/${SAMPLE}.bam` (after `samtools fixmate -m` on a name-sorted BAM) marks duplicates without removing them; downstream MethylDackel calls exclude them with `--ignoreFlags 1024` (any `samtools view` on the BAM: `-F 1024`). Validate: `grep 'Total number duplicated' dedup/${SAMPLE}.deduplication_report.txt` or `samtools flagstat dedup/${SAMPLE}.bam | grep duplicates`.
 
 5. Measure M-bias, then extract with trimming derived from it (do not guess trim lengths).
 
@@ -126,7 +126,8 @@ For bwa-meth BAMs: `samtools markdup -r -@ 8 align/${SAMPLE}.bam dedup/${SAMPLE}
 set -euo pipefail
 SAMPLE=S1
 REF=ref/GRCh38_plus_lambda_pUC19.fa
-MethylDackel mbias -@ 8 "${REF}" "dedup/${SAMPLE}.bam" "qc/${SAMPLE}" > "qc/${SAMPLE}.mbias_suggest.txt" 2>&1
+mkdir -p qc
+MethylDackel mbias -@ 8 --ignoreFlags 1024 "${REF}" "dedup/${SAMPLE}.bam" "qc/${SAMPLE}" > "qc/${SAMPLE}.mbias_suggest.txt" 2>&1
 grep -- '--OT' "qc/${SAMPLE}.mbias_suggest.txt"
 ```
 `mbias` prints a `Suggested inclusion options: --OT a,b,c,d --OB ...` line; pass exactly that to `extract`:
@@ -136,7 +137,7 @@ set -euo pipefail
 SAMPLE=S1
 REF=ref/GRCh38_plus_lambda_pUC19.fa
 INCL="$(grep -o -- '--OT.*' "qc/${SAMPLE}.mbias_suggest.txt")"
-MethylDackel extract -@ 8 --mergeContext --minDepth 1 ${INCL} "${REF}" "dedup/${SAMPLE}.bam" -o "meth/${SAMPLE}"
+MethylDackel extract -@ 8 --ignoreFlags 1024 --mergeContext --minDepth 1 ${INCL} "${REF}" "dedup/${SAMPLE}.bam" -o "meth/${SAMPLE}"
 ```
 Bismark branch (M-bias comes from the extractor report; rerun with `--ignore_r2 N`/`--ignore_3prime N` if the plot shows end bias):
 

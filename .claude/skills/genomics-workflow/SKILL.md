@@ -22,11 +22,11 @@ Expert in running and writing genomics workflows so that a run is resumable, por
 
 ## Operating rules
 
-Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/peek.sh <file>`); inspect headers before asking questions; run `bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/ref_sanity.sh <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
+Follow the eight rules in the `genomics` router skill (`.claude/skills/genomics/SKILL.md`): never read data files into context (preview with `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/peek.sh" <file>`); inspect headers before asking questions; run `bash "${CLAUDE_SKILL_DIR}/../genomics/scripts/ref_sanity.sh" <ref.fa> <inputs...>` before combining inputs; `set -euo pipefail` plus per-step validation; pin and record tool, reference and database versions; estimate disk/RAM/time before expensive steps; treat every threshold below as a default to justify, not a truth; treat human data as controlled-access.
 
 ## Environment
 
-!`bash ${CLAUDE_PROJECT_DIR}/.claude/skills/genomics/scripts/check_env.sh nextflow nf-core snakemake java docker singularity apptainer conda mamba pixi sbatch squeue cromwell miniwdl cwltool tw`
+!`f="${CLAUDE_SKILL_DIR}/../genomics/scripts/check_env.sh"; [ -f "$f" ] && bash "$f" nextflow nf-core snakemake java docker singularity apptainer conda mamba pixi sbatch squeue cromwell miniwdl cwltool tw || true`
 
 Missing tools: prefer `-profile docker|singularity|conda` via nf-core or a pinned container; never guess a version. Verified current: Nextflow 26.10.7 (stable, `NXF_VER=26.10.7`; requires Java 17+), Snakemake 9.27.2 (the 8+ CLI applies), nf-core/tools 4.2.2 (`nf-core pipelines …` subcommands), nf-core/sarek 3.12.0. Benchmark tools live in `genomics-benchmark`.
 
@@ -66,8 +66,8 @@ Cloud back-ends (one row each; executor is set in config, not code):
 | AWS Batch / HealthOmics | `process.executor = 'awsbatch'`, `aws.batch.cliPath`, S3 work dir; HealthOmics runs Nextflow/WDL/CWL natively (`aws omics start-run`) | HealthOmics needs the pipeline packaged as a zip + ECR images |
 | Google Batch | `process.executor = 'google-batch'`, `google.project`, `google.location`, `gs://` work dir | preemptible via `google.batch.spot = true` |
 | Azure Batch | `process.executor = 'azurebatch'`, `azure.storage.accountName`, `az://` work dir | pool autoscale in `azure.batch.pools` |
-| Terra / AnVIL | WDL on Cromwell via Terra UI/API; Nextflow via Seqera Platform compute env | controlled-access data stays in the workspace |
-| Seqera Platform (any of the above + HPC) | `nextflow launch` or `tw launch <pipeline> --compute-env <ce> --params-file params.yaml`; `-with-tower` for monitoring | Wave builds/augments containers; Fusion mounts object storage |
+| Terra / AnVIL | WDL on Cromwell via Terra UI/API; Nextflow via Seqera Platform compute env | controlled-access data stays in the workspace; moving data in or out needs the DUA/consent check (rule 8) |
+| Seqera Platform (any of the above + HPC) | `nextflow launch` or `tw launch <pipeline> --compute-env <ce> --params-file params.yaml`; `-with-tower` for monitoring | Wave builds/augments containers; Fusion mounts object storage. `-with-tower` ships task names, `tag` values (often sample IDs), paths and logs to Seqera's service: confirm the DUA allows it or use an on-prem Platform/Enterprise instance |
 
 ## Workflow
 
@@ -153,12 +153,7 @@ conda env export --no-builds > "${OUTDIR}/provenance/environment.lock.yml" 2>/de
 
 Validate: `grep -c ':' "${OUTDIR}/provenance/"*software_versions.yml` > 0; nf-core pipelines also emit `pipeline_info/execution_report_*.html`, `execution_trace_*.txt`, `params_*.json`. For containers pin by digest (`image@sha256:…`, resolve with `docker buildx imagetools inspect <image:tag>` or `skopeo inspect docker://<image:tag> | jq -r .Digest`); for conda use `conda-lock -f environment.yml -p linux-64` and ship `conda-lock.yml`; for pixi commit `pixi.lock`. The `versions.txt` capture snippet for ad-hoc scripts is in `templates.md`.
 
-7. Clean up.
-
-```bash
-set -euo pipefail
-nextflow clean -before "$(nextflow log -q | tail -1)" -f -k
-```
+7. Clean up — only after the user confirms no `-resume` is needed for the session being cleaned: `nextflow clean -f -before <run_name>` (run name from `nextflow log -q`; `-k` also drops the run's log entry).
 
 Validate: `du -sh "${NXF_WORK:-work}"`. Snakemake: `snakemake --delete-temp-output`, `rm -rf .snakemake/conda` only after `conda env export`. Never delete the latest successful session's work dir if you still want `-resume`.
 
