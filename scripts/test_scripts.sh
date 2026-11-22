@@ -25,6 +25,12 @@ printf '@r1 1:N:0:ACGT\nACGTACGTAC\n+\nIIIIIIIIII\n' | gzip > r.fq.gz
 ln -s r.fq.gz link.fq.gz
 printf '@r1\nACG\n' | gzip > short.fq.gz
 printf 'not really bcf' > fake.bcf
+# PATH with coreutils but without samtools/bcftools (simulates a bare runner deterministically)
+mkdir -p nobin
+for u in bash sh mktemp rm cut sort wc tr awk gzip cat grep head tail join du readlink sed file date sleep ls env uniq; do
+  p=$(command -v "$u" 2>/dev/null) && ln -s "$p" "nobin/$u"
+done
+if [ -e nobin/samtools ] || [ -e nobin/bcftools ]; then echo "fixture error: nobin must not contain samtools/bcftools"; exit 1; fi
 
 # ---------- ref_sanity ----------
 bash "$S/ref_sanity.sh" ref.fa good.vcf ok.bed nocontig.vcf >/dev/null || bad "ref_sanity: consistent inputs (incl. track header, no ##contig) should pass"
@@ -43,7 +49,7 @@ grep -q '^WARN' <<<"$out" || bad "ref_sanity: alt/HLA gaps should be WARN"
 # Primary contig missing from reference: MISMATCH
 if bash "$S/ref_sanity.sh" ref.fa wrong_primary.dict >/dev/null 2>&1; then bad "ref_sanity: missing primary contig should fail"; fi
 # Missing tool: SKIP with exit 2, never a MISMATCH built from binary garbage
-out=$(PATH=/nonexistent bash "$S/ref_sanity.sh" ref.fa fake.bcf 2>/dev/null; echo "rc=$?")
+out=$(PATH="$T/nobin" bash "$S/ref_sanity.sh" ref.fa fake.bcf 2>/dev/null; echo "rc=$?")
 grep -q '^SKIP' <<<"$out" || bad "ref_sanity: BCF without bcftools should SKIP"
 grep -q 'rc=2' <<<"$out" || bad "ref_sanity: SKIP should exit 2"
 
@@ -57,7 +63,7 @@ bash "$S/peek.sh" short.fq.gz 1 >/dev/null 2>&1 || bad "peek: 2-line fastq must 
 bash "$S/peek.sh" good.vcf 1 >/dev/null || bad "peek: vcf"
 bash "$S/peek.sh" ok.bed >/dev/null || bad "peek: bed"
 bash "$S/peek.sh" ref.fa >/dev/null || bad "peek: fasta"
-out=$(PATH=/nonexistent:/usr/bin:/bin bash "$S/peek.sh" fake.bcf 2>&1 || true)
+out=$(PATH="$T/nobin" bash "$S/peek.sh" fake.bcf 2>&1 || true)
 grep -q 'binary BCF' <<<"$out" || bad "peek: BCF without bcftools must not dump bytes"
 if bash "$S/peek.sh" does-not-exist 2>/dev/null; then bad "peek: should error on missing file"; fi
 

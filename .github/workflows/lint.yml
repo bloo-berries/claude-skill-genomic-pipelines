@@ -40,6 +40,6 @@ jobs:
             --no-progress --timeout 30 --max-retries 2 --accept 200,206,403,429
             --exclude '^https?://(localhost|127\.0\.0\.1)'
             --exclude 'gs://' --exclude 's3://'
-            --exclude-private --exclude-link-local --exclude-mail
+            --exclude-private --exclude-link-local
             '.claude/skills/**/*.md' README.md CLAUDE.md
           fail: true

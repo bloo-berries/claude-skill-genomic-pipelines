@@ -12,7 +12,8 @@ shift
 [ $# -ge 1 ] || { echo "ref_sanity: give at least one input file" >&2; exit 2; }
 [ -e "$ref" ] || { echo "ref_sanity: reference not found: $ref" >&2; exit 2; }
 
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+tmp=$(mktemp -d) || { echo "ref_sanity: cannot create a temp directory" >&2; exit 2; }
+trap 'rm -rf "$tmp"' EXIT
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # Locate or build (in tmp) the .fai
